@@ -6,27 +6,41 @@ export interface RecentFolder {
     lastOpenedAt: string;
 }
 
+export interface PinnedWorkspace {
+    path: string;
+    name: string;
+    initials: string;
+    emoji?: string;
+    pinnedAt: string;
+}
+
 export type AppScope = "global" | "workspace";
 
 export interface AppSettings {
     lastOpenedFolder: string | null;
     lastOpenedAt: string | null;
     recentFolders: RecentFolder[];
+    pinnedWorkspaces: PinnedWorkspace[];
     lastScope: AppScope;
+    sidebarExpanded: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
     lastOpenedFolder: null,
     lastOpenedAt: null,
     recentFolders: [],
+    pinnedWorkspaces: [],
     lastScope: "global",
+    sidebarExpanded: false,
 };
 
 const KEYS = {
     LAST_OPENED_FOLDER: "lastOpenedFolder",
     LAST_OPENED_AT: "lastOpenedAt",
     RECENT_FOLDERS: "recentFolders",
+    PINNED_WORKSPACES: "pinnedWorkspaces",
     LAST_SCOPE: "lastScope",
+    SIDEBAR_EXPANDED: "sidebarExpanded",
 } as const;
 
 const STORE_FILE = "settings.json";
@@ -76,13 +90,17 @@ export async function getSettings(): Promise<AppSettings> {
         const lastOpenedFolder = await store.get<string>(KEYS.LAST_OPENED_FOLDER);
         const lastOpenedAt = await store.get<string>(KEYS.LAST_OPENED_AT);
         const recentFolders = await store.get<RecentFolder[]>(KEYS.RECENT_FOLDERS);
+        const pinnedWorkspaces = await store.get<PinnedWorkspace[]>(KEYS.PINNED_WORKSPACES);
         const lastScope = await store.get<AppScope>(KEYS.LAST_SCOPE);
+        const sidebarExpanded = await store.get<boolean>(KEYS.SIDEBAR_EXPANDED);
 
         return {
             lastOpenedFolder: lastOpenedFolder ?? null,
             lastOpenedAt: lastOpenedAt ?? null,
             recentFolders: recentFolders ?? [],
+            pinnedWorkspaces: pinnedWorkspaces ?? [],
             lastScope: lastScope ?? "global",
+            sidebarExpanded: sidebarExpanded ?? false,
         };
     } catch {
         return DEFAULT_SETTINGS;
@@ -189,4 +207,81 @@ export async function checkFolderExists(folderPath: string): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+export function deriveInitials(name: string): string {
+    const parts = name.replace(/[^a-zA-Z0-9\s-_]/g, "").split(/[\s\-_]+/);
+    if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+}
+
+export async function getPinnedWorkspaces(): Promise<PinnedWorkspace[]> {
+    try {
+        const store = await getStore();
+        if (!store) return [];
+        return (await store.get<PinnedWorkspace[]>(KEYS.PINNED_WORKSPACES)) ?? [];
+    } catch {
+        return [];
+    }
+}
+
+export async function pinWorkspace(
+    folderPath: string,
+    folderName: string,
+    emoji?: string
+): Promise<PinnedWorkspace[]> {
+    try {
+        const store = await getStore();
+        if (!store) return [];
+
+        const existing =
+            (await store.get<PinnedWorkspace[]>(KEYS.PINNED_WORKSPACES)) ?? [];
+
+        if (existing.some((p) => p.path === folderPath)) return existing;
+
+        const pinned: PinnedWorkspace = {
+            path: folderPath,
+            name: folderName,
+            initials: deriveInitials(folderName),
+            emoji,
+            pinnedAt: new Date().toISOString(),
+        };
+
+        const updated = [...existing, pinned];
+        await store.set(KEYS.PINNED_WORKSPACES, updated);
+        await store.save();
+        return updated;
+    } catch {
+        return [];
+    }
+}
+
+export async function unpinWorkspace(
+    folderPath: string
+): Promise<PinnedWorkspace[]> {
+    try {
+        const store = await getStore();
+        if (!store) return [];
+
+        const existing =
+            (await store.get<PinnedWorkspace[]>(KEYS.PINNED_WORKSPACES)) ?? [];
+        const filtered = existing.filter((p) => p.path !== folderPath);
+        await store.set(KEYS.PINNED_WORKSPACES, filtered);
+        await store.save();
+        return filtered;
+    } catch {
+        return [];
+    }
+}
+
+export async function saveSidebarExpanded(expanded: boolean): Promise<void> {
+    try {
+        const store = await getStore();
+        if (!store) return;
+
+        await store.set(KEYS.SIDEBAR_EXPANDED, expanded);
+        await store.save();
+    } catch {}
 }

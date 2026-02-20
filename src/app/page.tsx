@@ -5,6 +5,7 @@ import {
   LoadingScreen,
   WorkspaceView,
 } from "@/components/workspace";
+import { AppSidebar } from "@/components/sidebar";
 import { useWorkspace } from "@/context";
 
 export default function Page() {
@@ -14,9 +15,12 @@ export default function Page() {
     return <LoadingScreen />;
   }
 
-  if (scope === "global") {
-    return <HomeScreen />;
-  }
-
-  return <WorkspaceView />;
+  return (
+    <div className="flex h-screen w-screen overflow-hidden">
+      <AppSidebar />
+      <main className="flex-1 overflow-auto">
+        {scope === "global" ? <HomeScreen /> : <WorkspaceView />}
+      </main>
+    </div>
+  );
 }

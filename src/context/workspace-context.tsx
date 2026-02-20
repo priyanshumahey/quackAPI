@@ -3,12 +3,17 @@
 import {
   checkFolderExists,
   clearLastOpenedFolder,
+  getPinnedWorkspaces,
   getRecentFolders,
   getSettings,
+  pinWorkspace,
   removeFromRecentFolders,
   saveLastOpenedFolder,
   saveLastScope,
+  saveSidebarExpanded,
+  unpinWorkspace,
   type AppScope,
+  type PinnedWorkspace,
   type RecentFolder,
 } from "@/lib/settings";
 import type {
@@ -41,6 +46,8 @@ export interface WorkspaceState {
   folderName: string | null;
   fileTree: FileEntry[];
   recentFolders: RecentFolder[];
+  pinnedWorkspaces: PinnedWorkspace[];
+  sidebarExpanded: boolean;
   error: string | null;
   quack: WorkspaceData;
 }
@@ -54,6 +61,10 @@ export interface WorkspaceContextValue extends WorkspaceState {
   removeFromRecent: (folderPath: string) => Promise<void>;
   refreshFileTree: () => Promise<void>;
   initWorkspace: () => Promise<void>;
+  pinCurrentWorkspace: (emoji?: string) => Promise<void>;
+  unpinWorkspaceByPath: (folderPath: string) => Promise<void>;
+  isCurrentWorkspacePinned: () => boolean;
+  toggleSidebar: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -82,6 +93,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     folderName: null,
     fileTree: [],
     recentFolders: [],
+    pinnedWorkspaces: [],
+    sidebarExpanded: false,
     error: null,
     quack: DEFAULT_QUACK,
   });
@@ -135,6 +148,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
         const settings = await getSettings();
         const recentFolders = settings.recentFolders;
+        const pinnedWorkspaces = settings.pinnedWorkspaces;
+        const sidebarExpanded = settings.sidebarExpanded;
 
         let restoredScope: AppScope = settings.lastScope ?? "global";
         let restoredPath: string | null = null;
@@ -173,6 +188,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           folderName: restoredName,
           fileTree: restoredTree,
           recentFolders,
+          pinnedWorkspaces,
+          sidebarExpanded,
           error: null,
           quack: restoredQuack,
         });
@@ -185,6 +202,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           folderName: null,
           fileTree: [],
           recentFolders: [],
+          pinnedWorkspaces: [],
+          sidebarExpanded: false,
           error: err instanceof Error ? err.message : String(err),
           quack: DEFAULT_QUACK,
         });
@@ -207,12 +226,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         await saveLastScope("workspace");
 
         const recentFolders = await getRecentFolders();
+        const pinnedWorkspaces = await getPinnedWorkspaces();
         let quack = DEFAULT_QUACK;
         try {
           quack = await loadQuackData(path);
         } catch { }
 
-        setState({
+        setState((prev) => ({
           isInitialized: true,
           isLoading: false,
           scope: "workspace",
@@ -220,9 +240,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           folderName,
           fileTree,
           recentFolders,
+          pinnedWorkspaces,
+          sidebarExpanded: prev.sidebarExpanded,
           error: null,
           quack,
-        });
+        }));
       } catch (err) {
         setState((prev) => ({
           ...prev,
@@ -348,6 +370,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [getTauriApis, openFolder, closeFolder]);
 
+  const pinCurrentWorkspace = useCallback(
+    async (emoji?: string) => {
+      if (!state.folderPath || !state.folderName) return;
+      const updated = await pinWorkspace(state.folderPath, state.folderName, emoji);
+      setState((prev) => ({ ...prev, pinnedWorkspaces: updated }));
+    },
+    [state.folderPath, state.folderName],
+  );
+
+  const unpinWorkspaceByPath = useCallback(async (folderPath: string) => {
+    const updated = await unpinWorkspace(folderPath);
+    setState((prev) => ({ ...prev, pinnedWorkspaces: updated }));
+  }, []);
+
+  const isCurrentWorkspacePinned = useCallback(() => {
+    if (!state.folderPath) return false;
+    return state.pinnedWorkspaces.some((p) => p.path === state.folderPath);
+  }, [state.folderPath, state.pinnedWorkspaces]);
+
+  const toggleSidebar = useCallback(() => {
+    setState((prev) => {
+      const next = !prev.sidebarExpanded;
+      saveSidebarExpanded(next);
+      return { ...prev, sidebarExpanded: next };
+    });
+  }, []);
+
   const value: WorkspaceContextValue = {
     ...state,
     openFolder,
@@ -358,6 +407,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     removeFromRecent,
     refreshFileTree,
     initWorkspace,
+    pinCurrentWorkspace,
+    unpinWorkspaceByPath,
+    isCurrentWorkspacePinned,
+    toggleSidebar,
   };
 
   return (

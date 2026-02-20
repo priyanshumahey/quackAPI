@@ -14,7 +14,7 @@ export function HomeScreen() {
     } = useWorkspace();
 
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-10 p-8 select-none">
+        <div className="flex min-h-full flex-col items-center justify-center gap-10 p-8 select-none">
             <div className="flex flex-col items-center gap-3 text-center">
                 <div className="flex items-center gap-2">
                     <Globe className="size-6 text-muted-foreground" />

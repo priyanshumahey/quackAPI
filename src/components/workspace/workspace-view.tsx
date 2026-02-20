@@ -78,7 +78,7 @@ export function WorkspaceView() {
   const { folderName, goHome, closeFolder, quack, isLoading } = useWorkspace();
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-full flex-col">
       <header className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon-sm" onClick={goHome} title="Global Scope">
