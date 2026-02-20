@@ -1,8 +1,10 @@
+mod commands;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{
-    AppHandle, Manager, RunEvent, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, WindowEvent,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };
@@ -62,8 +64,100 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_stronghold::Builder::new(|_pass| todo!()).build())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            commands::read_directory,
+            commands::expand_directory,
+            commands::check_folder_exists,
+            commands::get_path_info,
+        ])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{
+                    MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+                };
+
+                let app_menu = SubmenuBuilder::new(app, "Quack API")
+                    .about(None)
+                    .separator()
+                    .services()
+                    .separator()
+                    .hide()
+                    .hide_others()
+                    .show_all()
+                    .separator()
+                    .quit()
+                    .build()?;
+
+                let open_folder =
+                    MenuItemBuilder::with_id("open_folder", "Open Folder...")
+                        .accelerator("CmdOrCtrl+O")
+                        .build(app)?;
+
+                let close_folder =
+                    MenuItemBuilder::with_id("close_folder", "Close Folder")
+                        .accelerator("CmdOrCtrl+W")
+                        .build(app)?;
+
+                let close_window =
+                    PredefinedMenuItem::close_window(app, Some("Close Window"))?;
+
+                let file_menu = SubmenuBuilder::new(app, "File")
+                    .item(&open_folder)
+                    .item(&close_folder)
+                    .separator()
+                    .item(&close_window)
+                    .build()?;
+
+                let edit_menu = SubmenuBuilder::new(app, "Edit")
+                    .undo()
+                    .redo()
+                    .separator()
+                    .cut()
+                    .copy()
+                    .paste()
+                    .select_all()
+                    .build()?;
+
+                let view_menu = SubmenuBuilder::new(app, "View")
+                    .fullscreen()
+                    .build()?;
+
+                let window_menu = SubmenuBuilder::new(app, "Window")
+                    .minimize()
+                    .build()?;
+
+                let menu = MenuBuilder::new(app)
+                    .items(&[
+                        &app_menu,
+                        &file_menu,
+                        &edit_menu,
+                        &view_menu,
+                        &window_menu,
+                    ])
+                    .build()?;
+
+                app.set_menu(menu)?;
+
+                app.on_menu_event(move |app_handle, event| {
+                    match event.id().as_ref() {
+                        "open_folder" => {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.emit("menu-open-folder", ());
+                            }
+                        }
+                        "close_folder" => {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.emit("menu-close-folder", ());
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
             let show_i = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let hide_i = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

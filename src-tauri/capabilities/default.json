@@ -7,8 +7,12 @@
   ],
   "permissions": [
     "core:default",
+    "core:menu:default",
+    "core:window:allow-start-dragging",
     "opener:default",
     "stronghold:default",
-    "store:default"
+    "store:default",
+    "dialog:default",
+    "dialog:allow-open"
   ]
 }
