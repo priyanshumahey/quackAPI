@@ -1,6 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,4 +113,153 @@ pub fn get_path_info(path: &str) -> PathInfo {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default(),
     }
+}
+
+#[tauri::command]
+pub fn check_quack_initialized(workspace_path: &str) -> bool {
+    Path::new(workspace_path).join(".quack").is_dir()
+}
+
+#[tauri::command]
+pub fn init_quack_workspace(workspace_path: &str) -> Result<(), String> {
+    let root = Path::new(workspace_path).join(".quack");
+    let collections = root.join("collections");
+    let environments = root.join("environments");
+
+    fs::create_dir_all(&collections)
+        .map_err(|e| format!("Failed to create collections dir: {e}"))?;
+    fs::create_dir_all(&environments)
+        .map_err(|e| format!("Failed to create environments dir: {e}"))?;
+
+    let hello = serde_json::json!({
+        "id": Uuid::new_v4().to_string(),
+        "name": "Hello World",
+        "requests": [
+            {
+                "id": Uuid::new_v4().to_string(),
+                "name": "Hello GET",
+                "method": "GET",
+                "url": "{{baseUrl}}/hello",
+                "headers": [],
+                "params": [],
+                "body": { "type": "none", "content": "" }
+            }
+        ]
+    });
+
+    fs::write(
+        collections.join("hello-world.json"),
+        serde_json::to_string_pretty(&hello)
+            .map_err(|e| format!("Failed to serialize collection: {e}"))?,
+    )
+    .map_err(|e| format!("Failed to write collection: {e}"))?;
+
+    fs::write(environments.join("local.env"), "BASE_URL=http://localhost:3000\n")
+        .map_err(|e| format!("Failed to write env: {e}"))?;
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionFile {
+    pub id: String,
+    pub name: String,
+    pub requests: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvVariable {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvFile {
+    pub name: String,
+    pub variables: Vec<EnvVariable>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuackWorkspaceData {
+    pub collections: Vec<CollectionFile>,
+    pub environments: Vec<EnvFile>,
+}
+
+#[tauri::command]
+pub fn load_quack_workspace(workspace_path: &str) -> Result<QuackWorkspaceData, String> {
+    let root = Path::new(workspace_path).join(".quack");
+    if !root.is_dir() {
+        return Err("Workspace not initialized".to_string());
+    }
+
+    let collections = read_collections(&root.join("collections"))?;
+    let environments = read_environments(&root.join("environments"))?;
+
+    Ok(QuackWorkspaceData {
+        collections,
+        environments,
+    })
+}
+
+fn read_collections(dir: &Path) -> Result<Vec<CollectionFile>, String> {
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+
+    let mut out = vec![];
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read collections: {e}"))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("Failed to read {path:?}: {e}"))?;
+            let collection: CollectionFile = serde_json::from_str(&content)
+                .map_err(|e| format!("Failed to parse {path:?}: {e}"))?;
+            out.push(collection);
+        }
+    }
+
+    Ok(out)
+}
+
+fn read_environments(dir: &Path) -> Result<Vec<EnvFile>, String> {
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+
+    let mut out = vec![];
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read environments: {e}"))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "env") {
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let content =
+                fs::read_to_string(&path).map_err(|e| format!("Failed to read {path:?}: {e}"))?;
+
+            let variables = content
+                .lines()
+                .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+                .filter_map(|line| {
+                    let (key, value) = line.split_once('=')?;
+                    Some(EnvVariable {
+                        key: key.trim().to_string(),
+                        value: value.trim().to_string(),
+                    })
+                })
+                .collect();
+
+            out.push(EnvFile { name, variables });
+        }
+    }
+
+    Ok(out)
 }

@@ -11,6 +11,11 @@ import {
   type AppScope,
   type RecentFolder,
 } from "@/lib/settings";
+import type {
+  Collection,
+  EnvironmentVariable,
+  WorkspaceData,
+} from "@/lib/types";
 import {
   createContext,
   useCallback,
@@ -37,6 +42,7 @@ export interface WorkspaceState {
   fileTree: FileEntry[];
   recentFolders: RecentFolder[];
   error: string | null;
+  quack: WorkspaceData;
 }
 
 export interface WorkspaceContextValue extends WorkspaceState {
@@ -47,6 +53,7 @@ export interface WorkspaceContextValue extends WorkspaceState {
   expandFolder: (path: string) => Promise<FileEntry[] | null>;
   removeFromRecent: (folderPath: string) => Promise<void>;
   refreshFileTree: () => Promise<void>;
+  initWorkspace: () => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -59,6 +66,13 @@ export function useWorkspace(): WorkspaceContextValue {
   return ctx;
 }
 
+const DEFAULT_QUACK: WorkspaceData = {
+  isQuackInitialized: false,
+  collections: [],
+  environments: {},
+  activeEnvironment: null,
+};
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WorkspaceState>({
     isInitialized: false,
@@ -69,6 +83,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     fileTree: [],
     recentFolders: [],
     error: null,
+    quack: DEFAULT_QUACK,
   });
 
   const getTauriApis = useCallback(async () => {
@@ -77,6 +92,41 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const { listen } = await import("@tauri-apps/api/event");
     return { invoke, open, listen };
   }, []);
+
+  const loadQuackData = useCallback(
+    async (folderPath: string): Promise<WorkspaceData> => {
+      const { invoke } = await getTauriApis();
+      const initialized = await invoke<boolean>("check_quack_initialized", {
+        workspacePath: folderPath,
+      });
+
+      if (!initialized) return DEFAULT_QUACK;
+
+      const raw = await invoke<{
+        collections: { id: string; name: string; requests: unknown }[];
+        environments: { name: string; variables: { key: string; value: string }[] }[];
+      }>("load_quack_workspace", { workspacePath: folderPath });
+
+      const collections: Collection[] = raw.collections.map((c) => ({
+        id: c.id,
+        name: c.name,
+        requests: Array.isArray(c.requests) ? c.requests as Collection["requests"] : [],
+      }));
+
+      const environments: Record<string, EnvironmentVariable[]> = {};
+      for (const env of raw.environments) {
+        environments[env.name] = env.variables;
+      }
+
+      return {
+        isQuackInitialized: true,
+        collections,
+        environments,
+        activeEnvironment: raw.environments[0]?.name ?? null,
+      };
+    },
+    [getTauriApis],
+  );
 
   useEffect(() => {
     const init = async () => {
@@ -90,6 +140,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         let restoredPath: string | null = null;
         let restoredName: string | null = null;
         let restoredTree: FileEntry[] = [];
+        let restoredQuack: WorkspaceData = DEFAULT_QUACK;
 
         if (restoredScope === "workspace" && settings.lastOpenedFolder) {
           const exists = await checkFolderExists(settings.lastOpenedFolder);
@@ -103,6 +154,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
               restoredTree = await invoke<FileEntry[]>("read_directory", {
                 path: restoredPath,
               });
+            } catch { }
+
+            try {
+              restoredQuack = await loadQuackData(restoredPath);
             } catch { }
           } else {
             await clearLastOpenedFolder();
@@ -119,6 +174,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           fileTree: restoredTree,
           recentFolders,
           error: null,
+          quack: restoredQuack,
         });
       } catch (err) {
         setState({
@@ -130,6 +186,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           fileTree: [],
           recentFolders: [],
           error: err instanceof Error ? err.message : String(err),
+          quack: DEFAULT_QUACK,
         });
       }
     };
@@ -150,6 +207,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         await saveLastScope("workspace");
 
         const recentFolders = await getRecentFolders();
+        let quack = DEFAULT_QUACK;
+        try {
+          quack = await loadQuackData(path);
+        } catch { }
 
         setState({
           isInitialized: true,
@@ -160,6 +221,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           fileTree,
           recentFolders,
           error: null,
+          quack,
         });
       } catch (err) {
         setState((prev) => ({
@@ -203,6 +265,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       folderName: null,
       fileTree: [],
       error: null,
+      quack: DEFAULT_QUACK,
     }));
   }, []);
 
@@ -215,6 +278,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       folderName: null,
       fileTree: [],
       error: null,
+      quack: DEFAULT_QUACK,
     }));
   }, []);
 
@@ -243,6 +307,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       await openFolderByPath(state.folderPath);
     }
   }, [state.folderPath, openFolderByPath]);
+
+  const initWorkspace = useCallback(async () => {
+    if (!state.folderPath) return;
+
+    try {
+      const { invoke } = await getTauriApis();
+      await invoke("init_quack_workspace", { workspacePath: state.folderPath });
+      const quack = await loadQuackData(state.folderPath);
+      setState((prev) => ({ ...prev, quack }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }, [state.folderPath, getTauriApis, loadQuackData]);
 
   useEffect(() => {
     let unlistenOpen: (() => void) | undefined;
@@ -277,6 +357,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     expandFolder,
     removeFromRecent,
     refreshFileTree,
+    initWorkspace,
   };
 
   return (

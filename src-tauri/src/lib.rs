@@ -71,6 +71,9 @@ pub fn run() {
             commands::expand_directory,
             commands::check_folder_exists,
             commands::get_path_info,
+            commands::check_quack_initialized,
+            commands::init_quack_workspace,
+            commands::load_quack_workspace,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
