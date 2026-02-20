@@ -1,7 +1,8 @@
-import { Geist, Geist_Mono, Figtree } from "next/font/google";
 import "@/styles/globals.css";
+import { Figtree, Geist, Geist_Mono } from "next/font/google";
+import { Providers } from "./providers";
 
-const figtree = Figtree({subsets:['latin'],variable:'--font-sans'});
+const figtree = Figtree({ subsets: ['latin'], variable: '--font-sans' });
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,7 +24,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

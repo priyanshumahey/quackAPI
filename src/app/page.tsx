@@ -1,29 +1,22 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useState } from "react";
+import {
+  HomeScreen,
+  LoadingScreen,
+  WorkspaceView,
+} from "@/components/workspace";
+import { useWorkspace } from "@/context";
 
-export default function Home() {
-  const [greeted, setGreeted] = useState<string | null>(null);
+export default function Page() {
+  const { isInitialized, isLoading, scope } = useWorkspace();
 
-  const greet = useCallback((): void => {
-    invoke<string>("greet")
-      .then((s) => {
-        setGreeted(s);
-      })
-      .catch((err: unknown) => {
-        console.error(err);
-      });
-  }, []);
+  if (!isInitialized || isLoading) {
+    return <LoadingScreen />;
+  }
 
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-4xl font-bold tracking-tight">Quack API</h1>
-      <p className="text-muted-foreground">
-        {greeted ?? "Click the button to call the Rust backend"}
-      </p>
-      <Button onClick={greet}>Greet</Button>
-    </div>
-  );
+  if (scope === "global") {
+    return <HomeScreen />;
+  }
+
+  return <WorkspaceView />;
 }
