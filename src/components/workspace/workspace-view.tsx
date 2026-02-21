@@ -3,6 +3,14 @@
 import { Button } from "@/components/ui/button";
 import { ResizablePanel } from "@/components/ui/resizable-panel";
 import { useWorkspace } from "@/context";
+import {
+  addEnvVariable,
+  listEnvironments,
+  toggleEnvFile,
+  toggleEnvVariable,
+  updateEnvVariable,
+  type EnvFile
+} from "@/lib/environments";
 import { Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityBar, type ActivityTab } from "./activity-bar";
@@ -11,7 +19,6 @@ import { EnvironmentEditor } from "./environment-editor";
 import { EnvironmentPanel } from "./environment-panel";
 import {
   MOCK_COLLECTIONS,
-  MOCK_ENVIRONMENTS,
   type MockFolder,
   type MockRequest,
 } from "./mock-data";
@@ -54,12 +61,25 @@ function InitPrompt() {
 }
 
 function WorkspaceContent() {
+  const { folderPath } = useWorkspace();
   const [activeActivity, setActiveActivity] = useState<ActivityTab>("collections");
   const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [enabledEnvIds, setEnabledEnvIds] = useState<Set<string>>(
-    () => new Set(MOCK_ENVIRONMENTS.filter((e) => e.isActive).map((e) => e.id))
-  );
+  const [environments, setEnvironments] = useState<EnvFile[]>([]);
+
+  const loadEnvs = useCallback(async () => {
+    if (!folderPath) return;
+    try {
+      const envs = await listEnvironments(folderPath);
+      setEnvironments(envs);
+    } catch (err) {
+      console.error("Failed to load environments", err);
+    }
+  }, [folderPath]);
+
+  useEffect(() => {
+    loadEnvs();
+  }, [loadEnvs]);
 
   const handleSelectRequest = useCallback(
     (id: string) => {
@@ -81,32 +101,91 @@ function WorkspaceContent() {
   );
 
   const handleSelectEnv = useCallback(
-    (id: string) => {
-      const tabId = `env-tab-${id}`;
+    (envName: string) => {
+      const tabId = `env-tab-${envName}`;
       if (!openTabs.some((t) => t.id === tabId)) {
-        const env = MOCK_ENVIRONMENTS.find((e) => e.id === id);
-        if (env) {
-          const newTab: EnvironmentTabItem = {
-            id: tabId,
-            kind: "environment",
-            name: env.name,
-          };
-          setOpenTabs((prev) => [...prev, newTab]);
-        }
+        const newTab: EnvironmentTabItem = {
+          id: tabId,
+          kind: "environment",
+          name: envName,
+        };
+        setOpenTabs((prev) => [...prev, newTab]);
       }
       setActiveTabId(tabId);
     },
     [openTabs]
   );
 
-  const handleToggleEnv = useCallback((id: string) => {
-    setEnabledEnvIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const handleToggleEnv = useCallback(
+    async (envName: string) => {
+      if (!folderPath) return;
+      const env = environments.find((e) => e.name === envName);
+      if (!env) return;
+      const newEnabled = !env.isEnabled;
+      try {
+        await toggleEnvFile(folderPath, envName, newEnabled);
+        setEnvironments((prev) =>
+          prev.map((e) => (e.name === envName ? { ...e, isEnabled: newEnabled } : e))
+        );
+      } catch (err) {
+        console.error("Failed to toggle env file", err);
+      }
+    },
+    [folderPath, environments]
+  );
+
+  const handleToggleVariable = useCallback(
+    async (envName: string, key: string, enabled: boolean) => {
+      if (!folderPath) return;
+      try {
+        await toggleEnvVariable(folderPath, envName, key, enabled);
+        setEnvironments((prev) =>
+          prev.map((e) => {
+            if (e.name !== envName) return e;
+            return {
+              ...e,
+              variables: e.variables.map((v) =>
+                v.key === key ? { ...v, enabled } : v
+              ),
+            };
+          })
+        );
+      } catch (err) {
+        console.error("Failed to toggle variable", err);
+      }
+    },
+    [folderPath]
+  );
+
+  const handleAddVariable = useCallback(
+    async (envName: string, key: string, value: string) => {
+      if (!folderPath) return;
+      try {
+        const updated = await addEnvVariable(folderPath, envName, key, value);
+        setEnvironments((prev) =>
+          prev.map((e) => (e.name === envName ? { ...e, variables: updated } : e))
+        );
+      } catch (err) {
+        console.error("Failed to add variable", err);
+      }
+    },
+    [folderPath]
+  );
+
+  const handleUpdateVariable = useCallback(
+    async (envName: string, oldKey: string, newKey: string, newValue: string) => {
+      if (!folderPath) return;
+      try {
+        const updated = await updateEnvVariable(folderPath, envName, oldKey, newKey, newValue);
+        setEnvironments((prev) =>
+          prev.map((e) => (e.name === envName ? { ...e, variables: updated } : e))
+        );
+      } catch (err) {
+        console.error("Failed to update variable", err);
+      }
+    },
+    [folderPath]
+  );
 
   const handleCloseTab = useCallback(
     (id: string) => {
@@ -122,7 +201,6 @@ function WorkspaceContent() {
   );
 
   const handleNewTab = useCallback(() => {
-    /* Stub: in the future this would open a blank new request */
   }, []);
 
   useEffect(() => {
@@ -143,17 +221,13 @@ function WorkspaceContent() {
       ? findRequestInTree(MOCK_COLLECTIONS, activeTab.id)
       : null;
 
-  const activeEnvironment =
-    activeTab?.kind === "environment"
-      ? MOCK_ENVIRONMENTS.find(
-        (e) => `env-tab-${e.id}` === activeTab.id
-      ) ?? null
-      : null;
-
-  const selectedEnvIdForPanel =
+  const activeEnvName =
     activeTab?.kind === "environment"
       ? activeTab.id.replace("env-tab-", "")
       : null;
+
+  const activeEnvironment =
+    activeEnvName ? environments.find((e) => e.name === activeEnvName) ?? null : null;
 
   return (
     <div className="flex h-full flex-1 overflow-hidden">
@@ -161,7 +235,7 @@ function WorkspaceContent() {
         activeTab={activeActivity}
         onTabChange={setActiveActivity}
         onRefresh={() => {
-          console.log("Resync triggered");
+          loadEnvs();
         }}
       />
 
@@ -174,9 +248,9 @@ function WorkspaceContent() {
         )}
         {activeActivity === "environments" && (
           <EnvironmentPanel
-            activeEnvId={selectedEnvIdForPanel}
+            environments={environments}
+            activeEnvName={activeEnvName}
             onSelectEnv={handleSelectEnv}
-            enabledEnvIds={enabledEnvIds}
             onToggleEnv={handleToggleEnv}
           />
         )}
@@ -204,8 +278,19 @@ function WorkspaceContent() {
         />
 
         <div className="flex-1 overflow-hidden">
-          {activeTab?.kind === "environment" ? (
-            <EnvironmentEditor environment={activeEnvironment} />
+          {activeTab?.kind === "environment" && activeEnvironment ? (
+            <EnvironmentEditor
+              environment={activeEnvironment}
+              onToggleVariable={(key, enabled) =>
+                handleToggleVariable(activeEnvironment.name, key, enabled)
+              }
+              onAddVariable={(key, value) =>
+                handleAddVariable(activeEnvironment.name, key, value)
+              }
+              onUpdateVariable={(oldKey, newKey, newValue) =>
+                handleUpdateVariable(activeEnvironment.name, oldKey, newKey, newValue)
+              }
+            />
           ) : (
             <RequestEditor requestName={activeRequest?.name ?? null} />
           )}

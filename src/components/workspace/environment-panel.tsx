@@ -1,28 +1,28 @@
 "use client";
 
+import type { EnvFile } from "@/lib/environments";
 import { cn } from "@/lib/utils";
 import { Globe, Plus, Search } from "lucide-react";
 import { useState } from "react";
-import { MOCK_ENVIRONMENTS } from "./mock-data";
 
 interface EnvironmentPanelProps {
-    activeEnvId: string | null;
-    onSelectEnv: (id: string) => void;
-    enabledEnvIds: Set<string>;
-    onToggleEnv: (id: string) => void;
+    environments: EnvFile[];
+    activeEnvName: string | null;
+    onSelectEnv: (name: string) => void;
+    onToggleEnv: (name: string) => void;
 }
 
 export function EnvironmentPanel({
-    activeEnvId,
+    environments,
+    activeEnvName,
     onSelectEnv,
-    enabledEnvIds,
     onToggleEnv,
 }: EnvironmentPanelProps) {
     const [search, setSearch] = useState("");
 
     const filtered = search.trim()
-        ? MOCK_ENVIRONMENTS.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
-        : MOCK_ENVIRONMENTS;
+        ? environments.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
+        : environments;
 
     return (
         <div className="flex h-full flex-col border-r border-border bg-sidebar select-none">
@@ -55,21 +55,21 @@ export function EnvironmentPanel({
                 ) : (
                     <div className="space-y-0.5">
                         {filtered.map((env) => {
-                            const isEnabled = enabledEnvIds.has(env.id);
+                            const isEnabled = env.isEnabled;
                             return (
                                 <div
-                                    key={env.id}
+                                    key={env.name}
                                     className={cn(
                                         "group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px]",
                                         "transition-colors duration-150",
                                         "hover:bg-muted/50",
-                                        activeEnvId === env.id && "bg-muted text-foreground"
+                                        activeEnvName === env.name && "bg-muted text-foreground"
                                     )}
                                 >
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            onToggleEnv(env.id);
+                                            onToggleEnv(env.name);
                                         }}
                                         title={isEnabled ? "Disable environment" : "Enable environment"}
                                         className={cn(
@@ -85,7 +85,7 @@ export function EnvironmentPanel({
                                         />
                                     </button>
                                     <button
-                                        onClick={() => onSelectEnv(env.id)}
+                                        onClick={() => onSelectEnv(env.name)}
                                         className="flex min-w-0 flex-1 items-center gap-2 cursor-pointer"
                                     >
                                         <Globe className={cn(
