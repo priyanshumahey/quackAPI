@@ -81,7 +81,7 @@ function InitPrompt() {
 }
 
 function WorkspaceContent() {
-  const { folderPath } = useWorkspace();
+  const { folderPath, refreshFileTree } = useWorkspace();
   const [activeActivity, setActiveActivity] = useState<ActivityTab>("collections");
   const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -562,9 +562,12 @@ function WorkspaceContent() {
       <ActivityBar
         activeTab={activeActivity}
         onTabChange={setActiveActivity}
-        onRefresh={() => {
-          loadEnvs();
-          loadCollections();
+        onRefresh={async () => {
+          await Promise.all([
+            refreshFileTree(),
+            loadEnvs(),
+            loadCollections(),
+          ]);
         }}
       />
 
@@ -680,7 +683,11 @@ function WorkspaceContent() {
               }}
             />
           ) : (
-            <RequestEditor requestName={activeRequest?.name ?? null} />
+            <RequestEditor
+              requestId={activeRequest?.id ?? null}
+              collectionRelPath={activeRequest?.collectionFile ?? null}
+              workspacePath={folderPath}
+            />
           )}
         </div>
       </div>

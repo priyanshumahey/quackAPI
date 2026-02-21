@@ -488,6 +488,181 @@ pub fn update_collection_description(
     fs::write(&file, new_content).map_err(|e| format!("Failed to write: {e}"))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestDetails {
+    pub id: String,
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<RequestHeaderDetail>,
+    pub params: Vec<RequestParamDetail>,
+    pub body: RequestBodyDetail,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestHeaderDetail {
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestParamDetail {
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestBodyDetail {
+    #[serde(rename = "type")]
+    pub body_type: String,
+    pub content: String,
+}
+
+fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
+    let headers = req
+        .headers
+        .iter()
+        .filter_map(|h| {
+            let obj = h.as_object()?;
+            Some(RequestHeaderDetail {
+                key: obj.get("key")?.as_str().unwrap_or("").to_string(),
+                value: obj.get("value")?.as_str().unwrap_or("").to_string(),
+                enabled: obj.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+            })
+        })
+        .collect();
+
+    let params = req
+        .params
+        .iter()
+        .filter_map(|p| {
+            let obj = p.as_object()?;
+            Some(RequestParamDetail {
+                key: obj.get("key")?.as_str().unwrap_or("").to_string(),
+                value: obj.get("value")?.as_str().unwrap_or("").to_string(),
+                enabled: obj.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+            })
+        })
+        .collect();
+
+    let body = match &req.body {
+        Some(b) => {
+            let obj = b.as_object();
+            RequestBodyDetail {
+                body_type: obj
+                    .and_then(|o| o.get("type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("none")
+                    .to_string(),
+                content: obj
+                    .and_then(|o| o.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            }
+        }
+        None => RequestBodyDetail {
+            body_type: "none".to_string(),
+            content: String::new(),
+        },
+    };
+
+    RequestDetails {
+        id: req.id.clone(),
+        name: req.name.clone(),
+        method: req.method.to_uppercase(),
+        url: req.url.clone(),
+        headers,
+        params,
+        body,
+    }
+}
+
+#[tauri::command]
+pub fn get_request_details(
+    workspace_path: &str,
+    collection_rel_path: &str,
+    request_id: &str,
+) -> Result<RequestDetails, String> {
+    let base = collections_dir(workspace_path);
+    let file = base.join(collection_rel_path);
+    if !file.is_file() {
+        return Err(format!("Collection not found: {collection_rel_path}"));
+    }
+
+    let content = fs::read_to_string(&file).map_err(|e| format!("Failed to read: {e}"))?;
+    let col: CollectionFile =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {e}"))?;
+
+    let req = col
+        .requests
+        .iter()
+        .find(|r| r.id == request_id)
+        .ok_or_else(|| format!("Request {request_id} not found"))?;
+
+    Ok(parse_request_details(req))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRequestPayload {
+    pub method: Option<String>,
+    pub url: Option<String>,
+    pub headers: Option<Vec<serde_json::Value>>,
+    pub params: Option<Vec<serde_json::Value>>,
+    pub body: Option<serde_json::Value>,
+}
+
+#[tauri::command]
+pub fn update_request(
+    workspace_path: &str,
+    collection_rel_path: &str,
+    request_id: &str,
+    payload: UpdateRequestPayload,
+) -> Result<(), String> {
+    let base = collections_dir(workspace_path);
+    let file = base.join(collection_rel_path);
+    if !file.is_file() {
+        return Err(format!("Collection not found: {collection_rel_path}"));
+    }
+
+    let content = fs::read_to_string(&file).map_err(|e| format!("Failed to read: {e}"))?;
+    let mut col: CollectionFile =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {e}"))?;
+
+    let req = col
+        .requests
+        .iter_mut()
+        .find(|r| r.id == request_id)
+        .ok_or_else(|| format!("Request {request_id} not found"))?;
+
+    if let Some(method) = payload.method {
+        req.method = method;
+    }
+    if let Some(url) = payload.url {
+        req.url = url;
+    }
+    if let Some(headers) = payload.headers {
+        req.headers = headers;
+    }
+    if let Some(params) = payload.params {
+        req.params = params;
+    }
+    if let Some(body) = payload.body {
+        req.body = Some(body);
+    }
+
+    let new_content = serde_json::to_string_pretty(&col)
+        .map_err(|e| format!("Failed to serialize: {e}"))?;
+    fs::write(&file, new_content).map_err(|e| format!("Failed to write: {e}"))
+}
+
 #[tauri::command]
 pub fn read_folder_readme(
     workspace_path: &str,

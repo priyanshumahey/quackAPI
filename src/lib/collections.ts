@@ -7,6 +7,41 @@ export interface CollectionRequestSummary {
     collectionFile: string;
 }
 
+export interface RequestHeaderDetail {
+    key: string;
+    value: string;
+    enabled: boolean;
+}
+
+export interface RequestParamDetail {
+    key: string;
+    value: string;
+    enabled: boolean;
+}
+
+export interface RequestBodyDetail {
+    type: string;
+    content: string;
+}
+
+export interface RequestDetails {
+    id: string;
+    name: string;
+    method: HttpMethod;
+    url: string;
+    headers: RequestHeaderDetail[];
+    params: RequestParamDetail[];
+    body: RequestBodyDetail;
+}
+
+export interface UpdateRequestPayload {
+    method?: string;
+    url?: string;
+    headers?: { key: string; value: string; enabled: boolean }[];
+    params?: { key: string; value: string; enabled: boolean }[];
+    body?: { type: string; content: string };
+}
+
 export interface CollectionFolder {
     type: "folder";
     id: string;
@@ -149,4 +184,21 @@ export async function writeFolderReadme(
     content: string,
 ): Promise<void> {
     return invoke("write_folder_readme", { workspacePath, folderRelPath, content });
+}
+
+export async function getRequestDetails(
+    workspacePath: string,
+    collectionRelPath: string,
+    requestId: string,
+): Promise<RequestDetails> {
+    return invoke<RequestDetails>("get_request_details", { workspacePath, collectionRelPath, requestId });
+}
+
+export async function updateRequest(
+    workspacePath: string,
+    collectionRelPath: string,
+    requestId: string,
+    payload: UpdateRequestPayload,
+): Promise<void> {
+    return invoke("update_request", { workspacePath, collectionRelPath, requestId, payload });
 }

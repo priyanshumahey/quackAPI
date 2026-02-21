@@ -95,6 +95,8 @@ pub fn run() {
             commands::rename_request,
             commands::delete_request,
             commands::update_collection_description,
+            commands::get_request_details,
+            commands::update_request,
             commands::read_folder_readme,
             commands::write_folder_readme,
         ])
