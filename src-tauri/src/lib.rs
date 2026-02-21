@@ -74,6 +74,12 @@ pub fn run() {
             commands::check_quack_initialized,
             commands::init_quack_workspace,
             commands::load_quack_workspace,
+            commands::list_environments,
+            commands::toggle_env_file,
+            commands::toggle_env_variable,
+            commands::add_env_variable,
+            commands::update_env_variable,
+            commands::delete_env_variable,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
