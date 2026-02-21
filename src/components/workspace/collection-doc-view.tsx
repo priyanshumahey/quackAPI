@@ -6,6 +6,7 @@ import { BookOpen, Check, Pencil, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkEnvVars } from "./remark-env-vars";
 
 interface CollectionDocViewProps {
     collectionRelPath: string;
@@ -13,6 +14,7 @@ interface CollectionDocViewProps {
     initialDescription: string | null;
     workspacePath: string;
     onDescriptionChange?: (description: string | null) => void;
+    activeEnvVars?: Record<string, string>;
 }
 
 export function CollectionDocView({
@@ -21,6 +23,7 @@ export function CollectionDocView({
     initialDescription,
     workspacePath,
     onDescriptionChange,
+    activeEnvVars,
 }: CollectionDocViewProps) {
     const [content, setContent] = useState<string | null>(initialDescription);
     const [isEditing, setIsEditing] = useState(false);
@@ -157,7 +160,28 @@ export function CollectionDocView({
                 ) : content !== null ? (
                     <div className="px-8 py-6 max-w-3xl">
                         <div className="md-prose">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            <ReactMarkdown
+                                remarkPlugins={[remarkGfm, remarkEnvVars]}
+                                components={{
+                                    envvar: ({ node }: any) => {
+                                        const varName = node?.properties?.name as string;
+                                        const isDefined = activeEnvVars != null && varName in activeEnvVars;
+                                        return (
+                                            <span
+                                                title={isDefined ? `${varName} = ${activeEnvVars![varName]}` : `${varName} — not in active environment`}
+                                                className={cn(
+                                                    "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-mono font-medium ring-1",
+                                                    isDefined
+                                                        ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-400"
+                                                        : "bg-muted text-muted-foreground ring-border"
+                                                )}
+                                            >
+                                                {`{{${varName}}}`}
+                                            </span>
+                                        );
+                                    },
+                                } as any}
+                            >
                                 {content}
                             </ReactMarkdown>
                         </div>

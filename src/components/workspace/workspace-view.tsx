@@ -113,6 +113,17 @@ function WorkspaceContent() {
     loadCollections();
   }, [loadEnvs, loadCollections]);
 
+  const activeEnvVars = useMemo(() => {
+    const vars: Record<string, string> = {};
+    for (const env of environments) {
+      if (!env.isEnabled) continue;
+      for (const v of env.variables) {
+        if (v.enabled) vars[v.key] = v.value;
+      }
+    }
+    return vars;
+  }, [environments]);
+
   const handleSelectRequest = useCallback(
     (id: string) => {
       if (!openTabs.some((t) => t.id === id)) {
@@ -635,6 +646,7 @@ function WorkspaceContent() {
               folderRelPath={activeTab.folderRelPath}
               folderName={activeTab.name}
               workspacePath={folderPath}
+              activeEnvVars={activeEnvVars}
             />
           ) : activeTab?.kind === "collection-doc" && folderPath ? (
             <CollectionDocView
@@ -652,6 +664,7 @@ function WorkspaceContent() {
                 return findCol(collections) ?? null;
               })()}
               workspacePath={folderPath}
+              activeEnvVars={activeEnvVars}
               onDescriptionChange={(desc) => {
                 setCollections(prev => {
                   const update = (items: CollectionTreeItem[]): CollectionTreeItem[] =>
