@@ -13,6 +13,11 @@ export interface EnvFile {
 }
 
 async function invoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+    for (const [key, value] of Object.entries(args)) {
+        if (value === undefined) {
+            throw new Error(`Argument "${key}" is undefined for command "${cmd}"`);
+        }
+    }
     const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
     return tauriInvoke<T>(cmd, args);
 }
