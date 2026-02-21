@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils";
 import type { HttpMethod } from "@/lib/types";
 import { BookOpen, Globe, Plus, X } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 const METHOD_COLORS: Record<string, string> = {
   GET: "text-emerald-600",
@@ -19,6 +20,7 @@ export interface RequestTabItem {
   kind: "request";
   name: string;
   method: HttpMethod;
+  collectionRelPath: string;
   isDirty?: boolean;
 }
 
@@ -53,6 +55,75 @@ interface RequestTabBarProps {
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: () => void;
+  onRenameTab?: (tab: RequestTabItem, newName: string) => void;
+}
+
+function TabName({
+  tab,
+  isActive,
+  onRename,
+}: {
+  tab: TabItem;
+  isActive: boolean;
+  onRename?: (tab: RequestTabItem, newName: string) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = useCallback(() => {
+    if (tab.kind !== "request" || !onRename) return;
+    setEditValue(tab.name);
+    setIsEditing(true);
+  }, [tab, onRename]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const commit = useCallback(() => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== tab.name && tab.kind === "request" && onRename) {
+      onRename(tab, trimmed);
+    }
+    setIsEditing(false);
+  }, [editValue, tab, onRename]);
+
+  const cancel = useCallback(() => {
+    setIsEditing(false);
+  }, []);
+
+  if (isEditing) {
+    return (
+      <input
+        ref={inputRef}
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-transparent outline-none text-[13px] w-[120px] border-b border-primary py-0 px-0 truncate"
+      />
+    );
+  }
+
+  return (
+    <span
+      className="truncate max-w-[140px]"
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        startEdit();
+      }}
+    >
+      {tab.name}
+    </span>
+  );
 }
 
 export function RequestTabBar({
@@ -61,6 +132,7 @@ export function RequestTabBar({
   onSelectTab,
   onCloseTab,
   onNewTab,
+  onRenameTab,
 }: RequestTabBarProps) {
   if (tabs.length === 0) return null;
 
@@ -93,7 +165,11 @@ export function RequestTabBar({
             ) : (
               <BookOpen className="size-3.5 shrink-0 text-sky-500" />
             )}
-            <span className="truncate max-w-[140px]">{tab.name}</span>
+            <TabName
+              tab={tab}
+              isActive={activeTabId === tab.id}
+              onRename={onRenameTab}
+            />
             {tab.isDirty && (
               <span className="size-1.5 rounded-full bg-foreground/30" />
             )}

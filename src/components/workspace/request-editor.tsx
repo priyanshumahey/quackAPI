@@ -8,12 +8,20 @@ import {
     type RequestHeaderDetail,
     type RequestParamDetail,
 } from "@/lib/collections";
+import { sendHttpRequest, type HttpResponse } from "@/lib/http";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { EnvFile } from "@/lib/environments";
 import { EnvVarInput, EnvVarText } from "./env-var-input";
-import { ChevronDown, ChevronUp, Loader2, Send, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ClipboardCopy, Loader2, Send, Trash2 } from "lucide-react";
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
+import json from "react-syntax-highlighter/dist/esm/languages/hljs/json";
+import xml from "react-syntax-highlighter/dist/esm/languages/hljs/xml";
+import { githubGist } from "react-syntax-highlighter/dist/esm/styles/hljs";
+
+SyntaxHighlighter.registerLanguage("json", json);
+SyntaxHighlighter.registerLanguage("xml", xml);
 
 const METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -39,14 +47,52 @@ const METHOD_BG: Record<string, string> = {
 
 type RequestTab = "params" | "auth" | "headers" | "body" | "pre-req" | "tests" | "settings";
 
-type ResponseTab = "pretty" | "raw" | "preview" | "visualize";
+type ResponseTab = "pretty" | "raw" | "headers";
 
 const RESPONSE_TABS: { id: ResponseTab; label: string }[] = [
     { id: "pretty", label: "Pretty" },
     { id: "raw", label: "Raw" },
-    { id: "preview", label: "Preview" },
-    { id: "visualize", label: "Visualize" },
+    { id: "headers", label: "Headers" },
 ];
+
+/**
+ * Replace `{{varName}}` placeholders with their resolved values from
+ * enabled environment files.  Unresolved variables are left as-is.
+ */
+function substituteEnvVars(text: string, environments: EnvFile[]): string {
+    return text.replace(/\{\{([^}]+)\}\}/g, (_match, varName: string) => {
+        for (const env of environments) {
+            if (!env.isEnabled) continue;
+            for (const v of env.variables) {
+                if (v.key === varName && v.enabled) return v.value;
+            }
+        }
+        return _match; // leave unresolved
+    });
+}
+
+/** Pretty-print JSON if possible, otherwise return raw text. */
+function tryPrettyJson(text: string): { formatted: string; isJson: boolean } {
+    try {
+        const parsed = JSON.parse(text);
+        return { formatted: JSON.stringify(parsed, null, 2), isJson: true };
+    } catch {
+        return { formatted: text, isJson: false };
+    }
+}
+
+/** Human-readable byte size. */
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function statusColor(code: number): string {
+    if (code < 300) return "text-emerald-500";
+    if (code < 400) return "text-amber-500";
+    return "text-red-500";
+}
 
 interface KVRow {
     key: string;
@@ -193,6 +239,12 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
     const [activeRequestTab, setActiveRequestTab] = useState<RequestTab>("params");
     const [activeResponseTab, setActiveResponseTab] = useState<ResponseTab>("pretty");
     const [showMethodDropdown, setShowMethodDropdown] = useState(false);
+
+    // Response state
+    const [responseData, setResponseData] = useState<HttpResponse | null>(null);
+    const [isSending, setIsSending] = useState(false);
+    const [sendError, setSendError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
 
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -354,6 +406,55 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
         [scheduleSave, bodyType]
     );
 
+    // ── Send request handler ────────────────────────────────────────────
+    const handleSend = useCallback(async () => {
+        if (!url.trim()) return;
+
+        const envs = environments ?? [];
+        const sub = (text: string) => substituteEnvVars(text, envs);
+
+        setIsSending(true);
+        setSendError(null);
+
+        try {
+            const result = await sendHttpRequest({
+                method,
+                url: sub(url),
+                headers: headers
+                    .filter((h) => h.key.trim() !== "" || h.value.trim() !== "")
+                    .map((h) => ({ key: sub(h.key), value: sub(h.value), enabled: h.enabled })),
+                params: params
+                    .filter((p) => p.key.trim() !== "" || p.value.trim() !== "")
+                    .map((p) => ({ key: sub(p.key), value: sub(p.value), enabled: p.enabled })),
+                body: { type: bodyType, content: sub(bodyContent) },
+            });
+            setResponseData(result);
+            setIsCollapsed(false);
+        } catch (err: unknown) {
+            let msg: string;
+            if (err instanceof Error) {
+                msg = err.message;
+            } else if (typeof err === "string") {
+                msg = err;
+            } else if (typeof err === "object" && err !== null && "message" in err) {
+                msg = String((err as { message: unknown }).message);
+            } else {
+                msg = "An unknown error occurred.";
+            }
+            setSendError(msg);
+            setResponseData(null);
+            setIsCollapsed(false);
+        } finally {
+            setIsSending(false);
+        }
+    }, [method, url, headers, params, bodyType, bodyContent, environments]);
+
+    // Formatted response for Pretty tab
+    const prettyResponse = useMemo(() => {
+        if (!responseData) return null;
+        return tryPrettyJson(responseData.body);
+    }, [responseData]);
+
     const HEADER_HEIGHT = 36;
     const MIN_HEIGHT = 120;
     const DEFAULT_HEIGHT = 280;
@@ -499,15 +600,22 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 />
 
                 <button
+                    onClick={handleSend}
+                    disabled={isSending}
                     className={cn(
                         "flex h-8 items-center gap-2 rounded-lg px-4 text-[13px] font-medium text-white",
                         "transition-all duration-150 cursor-pointer shadow-sm",
                         "hover:shadow-md active:scale-[0.98]",
+                        isSending && "opacity-70 pointer-events-none",
                         METHOD_BG[method]
                     )}
                 >
-                    <Send className="size-3.5" />
-                    Send
+                    {isSending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                        <Send className="size-3.5" />
+                    )}
+                    {isSending ? "Sending…" : "Send"}
                 </button>
             </div>
 
@@ -660,17 +768,135 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                             )}
                         </div>
                         <div className="flex items-center gap-3 text-[12px]">
-                            <span className="text-muted-foreground/50 italic">No response yet</span>
+                            {responseData ? (
+                                <>
+                                    <span className={cn("font-semibold", statusColor(responseData.status))}>
+                                        {responseData.status} {responseData.statusText}
+                                    </span>
+                                    <span className="text-muted-foreground/60">{responseData.timeMs} ms</span>
+                                    <span className="text-muted-foreground/60">{formatBytes(responseData.sizeBytes)}</span>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const text = activeResponseTab === "headers"
+                                                ? responseData.headers.map((h) => `${h.key}: ${h.value}`).join("\n")
+                                                : activeResponseTab === "pretty"
+                                                    ? (prettyResponse?.formatted ?? responseData.body)
+                                                    : responseData.body;
+                                            navigator.clipboard.writeText(text).then(() => {
+                                                setCopied(true);
+                                                setTimeout(() => setCopied(false), 1500);
+                                            });
+                                        }}
+                                        className="ml-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                                        title="Copy response"
+                                    >
+                                        {copied ? <Check className="size-3" /> : <ClipboardCopy className="size-3" />}
+                                        <span className="text-[11px]">{copied ? "Copied" : "Copy"}</span>
+                                    </button>
+                                </>
+                            ) : sendError ? (
+                                <>
+                                    <span className="text-red-500 font-medium">Error</span>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            navigator.clipboard.writeText(sendError).then(() => {
+                                                setCopied(true);
+                                                setTimeout(() => setCopied(false), 1500);
+                                            });
+                                        }}
+                                        className="ml-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted/50 transition-colors cursor-pointer"
+                                        title="Copy error"
+                                    >
+                                        {copied ? <Check className="size-3" /> : <ClipboardCopy className="size-3" />}
+                                        <span className="text-[11px]">{copied ? "Copied" : "Copy"}</span>
+                                    </button>
+                                </>
+                            ) : (
+                                <span className="text-muted-foreground/50 italic">No response yet</span>
+                            )}
                         </div>
                     </div>
 
                     {!isCollapsed && (
                       <ScrollArea className="min-h-0 flex-1 bg-muted/20">
-                          <div className="flex h-full items-center justify-center p-4">
-                              <p className="text-[13px] text-muted-foreground/50 italic">
-                                  Click Send to make a request.
-                              </p>
-                          </div>
+                          {isSending ? (
+                              <div className="flex h-full items-center justify-center p-8">
+                                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                              </div>
+                          ) : sendError ? (
+                              <div className="p-4">
+                                  <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-[13px] text-red-500">
+                                      {sendError}
+                                  </div>
+                              </div>
+                          ) : responseData ? (
+                              <>
+                                  {activeResponseTab === "pretty" && (
+                                      <div className="p-4 text-[13px] select-text [&_.linenumber]:!select-none [&_.linenumber]:!-mr-[1em] [&_code]:!select-text">
+                                          <SyntaxHighlighter
+                                              language={prettyResponse?.isJson ? "json" : "xml"}
+                                              style={githubGist}
+                                              customStyle={{
+                                                  margin: 0,
+                                                  padding: 0,
+                                                  background: "transparent",
+                                                  fontSize: "13px",
+                                                  lineHeight: "1.5",
+                                                  fontFamily: "var(--font-mono)",
+                                              }}
+                                              showLineNumbers={true}
+                                              lineNumberStyle={{
+                                                  minWidth: "2.5em",
+                                                  paddingRight: "1em",
+                                                  color: "var(--muted-foreground)",
+                                                  opacity: 0.35,
+                                                  textAlign: "right",
+                                                  userSelect: "none",
+                                                  MozUserSelect: "none",
+                                                  WebkitUserSelect: "none",
+                                              }}
+                                              wrapLines={true}
+                                              wrapLongLines={true}
+                                              lineProps={() => ({
+                                                  style: { display: "block", cursor: "text" },
+                                                  className: "hover:bg-muted/30 transition-colors",
+                                              })}
+                                          >
+                                              {prettyResponse?.formatted ?? responseData.body}
+                                          </SyntaxHighlighter>
+                                      </div>
+                                  )}
+                                  {activeResponseTab === "raw" && (
+                                      <pre className="whitespace-pre-wrap break-all p-4 font-mono text-[13px] leading-relaxed text-foreground/90 select-text">
+                                          {responseData.body}
+                                      </pre>
+                                  )}
+                                  {activeResponseTab === "headers" && (
+                                      <div className="p-4">
+                                          <div className="overflow-hidden rounded-lg border border-border">
+                                              <div className="grid grid-cols-[1fr_2fr] bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                                                  <div className="px-3 py-2">Key</div>
+                                                  <div className="border-l border-border px-3 py-2">Value</div>
+                                              </div>
+                                              {responseData.headers.map((h, i) => (
+                                                  <div key={i} className="grid grid-cols-[1fr_2fr] border-t border-border">
+                                                      <div className="px-3 py-2 text-[13px] font-medium text-foreground/80">{h.key}</div>
+                                                      <div className="border-l border-border px-3 py-2 text-[13px] text-foreground/60 break-all">{h.value}</div>
+                                                  </div>
+                                              ))}
+                                          </div>
+                                      </div>
+                                  )}
+                              </>
+                          ) : (
+                              <div className="flex h-full items-center justify-center p-4">
+                                  <p className="text-[13px] text-muted-foreground/50 italic">
+                                      Click Send to make a request.
+                                  </p>
+                              </div>
+                          )}
                       </ScrollArea>
                     )}
                 </div>

@@ -134,6 +134,7 @@ function WorkspaceContent() {
             kind: "request",
             name: req.name,
             method: req.method,
+            collectionRelPath: req.collectionFile,
           };
           setOpenTabs((prev) => [...prev, newTab]);
         }
@@ -299,13 +300,22 @@ function WorkspaceContent() {
           "GET"
         );
         await loadCollections();
-        // Auto-open the new request in a tab
-        handleSelectRequest(newId);
+        if (!openTabs.some((t) => t.id === newId)) {
+          const newTab: RequestTabItem = {
+            id: newId,
+            kind: "request",
+            name: "New Request",
+            method: "GET",
+            collectionRelPath,
+          };
+          setOpenTabs((prev) => [...prev, newTab]);
+        }
+        setActiveTabId(newId);
       } catch (err) {
         console.error("Failed to add request", err);
       }
     },
-    [folderPath, loadCollections, handleSelectRequest]
+    [folderPath, loadCollections, openTabs]
   );
 
   const handleSelectEnv = useCallback(
@@ -623,6 +633,16 @@ function WorkspaceContent() {
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
+          onRenameTab={(tab, newName) => {
+            const relPath =
+              tab.collectionRelPath ||
+              findRequestInTree(collections, tab.id)?.collectionFile;
+            if (relPath) {
+              handleRenameRequest(tab.id, relPath, newName);
+            } else {
+              console.error("Cannot rename: collectionRelPath not found for", tab.id);
+            }
+          }}
         />
 
         <div className="flex-1 overflow-hidden">
