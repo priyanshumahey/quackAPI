@@ -74,7 +74,7 @@ export function EnvironmentPanel({
     }, [renameValue, renamingEnv, onRenameEnv]);
 
     return (
-        <div className="flex h-full flex-col border-r border-border bg-sidebar select-none">
+        <div className="flex h-full flex-col border-r border-border bg-background select-none">
             <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
                     Environments
@@ -85,7 +85,7 @@ export function EnvironmentPanel({
                         setIsCreating(true);
                         setCreateName("");
                     }}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-muted/60 hover:text-foreground transition-colors duration-150 cursor-pointer"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
                 >
                     <Plus className="size-3.5" />
                 </button>
@@ -139,8 +139,8 @@ export function EnvironmentPanel({
                                     className={cn(
                                         "group relative flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px]",
                                         "transition-colors duration-150",
-                                        "hover:bg-muted/50",
-                                        activeEnvName === env.name && "bg-muted text-foreground"
+                                        "hover:bg-accent",
+                                        activeEnvName === env.name && "bg-accent text-accent-foreground"
                                     )}
                                 >
                                     <button
@@ -216,7 +216,7 @@ export function EnvironmentPanel({
                                                     setMenuOpenEnv(menuOpenEnv === env.name ? null : env.name);
                                                 }}
                                                 className={cn(
-                                                    "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/40 hover:bg-muted hover:text-foreground transition-colors duration-150 cursor-pointer",
+                                                    "flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/40 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer",
                                                     "opacity-0 group-hover:opacity-100",
                                                     menuOpenEnv === env.name && "opacity-100"
                                                 )}
@@ -236,7 +236,7 @@ export function EnvironmentPanel({
                                                             setRenamingEnv(env.name);
                                                             setRenameValue(env.name);
                                                         }}
-                                                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-muted/60 transition-colors duration-150 cursor-pointer"
+                                                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
                                                     >
                                                         <Pencil className="size-3.5" />
                                                         Rename
@@ -247,7 +247,7 @@ export function EnvironmentPanel({
                                                             setMenuOpenEnv(null);
                                                             onDeleteEnv(env.name);
                                                         }}
-                                                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-red-500 hover:bg-red-500/10 transition-colors duration-150 cursor-pointer"
+                                                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors duration-150 cursor-pointer"
                                                     >
                                                         <Trash2 className="size-3.5" />
                                                         Delete

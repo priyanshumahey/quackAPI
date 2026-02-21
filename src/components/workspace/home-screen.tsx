@@ -64,7 +64,7 @@ export function HomeScreen() {
                         {recentFolders.map((folder) => (
                             <li
                                 key={folder.path}
-                                className="group flex items-center justify-between px-4 py-3 transition-colors hover:bg-muted/50"
+                                className="group flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent"
                             >
                                 <button
                                     className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"

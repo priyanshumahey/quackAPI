@@ -40,7 +40,7 @@ function Squircle({
         ${
           isActive
             ? "bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-md shadow-indigo-500/20 ring-2 ring-indigo-300/60"
-            : "bg-black/[0.06] text-foreground/60 hover:bg-black/[0.10] hover:text-foreground"
+            : "bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         }
         ${className}
       `}
@@ -117,7 +117,7 @@ function IconAction({
         ${
           variant === "destructive"
             ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         }
       `}
     >
@@ -215,7 +215,7 @@ export function AppSidebar() {
           title={expanded ? "Collapse sidebar" : "Expand sidebar"}
           className="absolute -right-3 top-5 z-10 flex h-6 w-6 items-center justify-center
             rounded-full border border-border bg-background text-muted-foreground
-            shadow-sm transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+            shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground cursor-pointer"
         >
           {expanded ? (
             <ChevronsLeft className="size-3.5" />
@@ -343,7 +343,7 @@ export function AppSidebar() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
-            className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
             onClick={() => {
               openFolderByPath(contextMenu.path);
               setContextMenu(null);
@@ -353,7 +353,7 @@ export function AppSidebar() {
             Open
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => {
               unpinWorkspaceByPath(contextMenu.path);
               setContextMenu(null);

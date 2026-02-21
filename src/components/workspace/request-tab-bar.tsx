@@ -82,7 +82,7 @@ export function RequestTabBar({
                 e.stopPropagation();
                 onCloseTab(tab.id);
               }}
-              className="ml-1 flex h-4 w-4 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-all duration-150 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+              className="ml-1 flex h-4 w-4 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-all duration-150 hover:bg-accent hover:text-accent-foreground group-hover:opacity-100"
             >
               <X className="size-3" />
             </button>
