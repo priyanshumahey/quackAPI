@@ -10,8 +10,10 @@ import {
 } from "@/lib/collections";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import type { EnvFile } from "@/lib/environments";
+import { EnvVarInput, EnvVarText } from "./env-var-input";
 import { ChevronDown, ChevronUp, Loader2, Send, Trash2 } from "lucide-react";
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 
 const METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -52,16 +54,68 @@ interface KVRow {
     enabled: boolean;
 }
 
+function KVValueCell({
+    value,
+    onChange,
+    environments,
+    onOpenEnvTab,
+}: {
+    value: string;
+    onChange: (val: string) => void;
+    environments?: EnvFile[];
+    onOpenEnvTab?: (envName: string) => void;
+}) {
+    const [isFocused, setIsFocused] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const hasVars = /\{\{[^}]+\}\}/.test(value);
+
+    return (
+        <div className="relative border-l border-border">
+            <input
+                ref={inputRef}
+                className={cn(
+                    "w-full bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:bg-muted/30 transition-colors",
+                    !isFocused && hasVars && "text-transparent caret-transparent"
+                )}
+                placeholder="Value"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+            />
+            {!isFocused && hasVars && environments && (
+                <div
+                    className="pointer-events-auto absolute inset-0 flex items-center overflow-hidden px-3 py-2 text-[13px]"
+                    onClick={(e) => {
+                        if ((e.target as HTMLElement).closest("[data-env-badge]")) return;
+                        inputRef.current?.focus();
+                    }}
+                >
+                    <EnvVarText
+                        text={value}
+                        environments={environments}
+                        onOpenEnvTab={onOpenEnvTab}
+                    />
+                </div>
+            )}
+        </div>
+    );
+}
+
 function KVTable({
     rows,
     onUpdate,
     onRemove,
     onAdd,
+    environments,
+    onOpenEnvTab,
 }: {
     rows: KVRow[];
     onUpdate: (index: number, field: "key" | "value", val: string) => void;
     onRemove: (index: number) => void;
     onAdd: () => void;
+    environments?: EnvFile[];
+    onOpenEnvTab?: (envName: string) => void;
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-border">
@@ -88,11 +142,11 @@ function KVTable({
                         value={row.key}
                         onChange={(e) => onUpdate(i, "key", e.target.value)}
                     />
-                    <input
-                        className="border-l border-border bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:bg-muted/30 transition-colors"
-                        placeholder="Value"
+                    <KVValueCell
                         value={row.value}
-                        onChange={(e) => onUpdate(i, "value", e.target.value)}
+                        onChange={(val) => onUpdate(i, "value", val)}
+                        environments={environments}
+                        onOpenEnvTab={onOpenEnvTab}
                     />
                     <div className="flex items-center justify-center border-l border-border">
                         <button
@@ -120,9 +174,11 @@ interface RequestEditorProps {
     requestId: string | null;
     collectionRelPath: string | null;
     workspacePath: string | null;
+    environments?: EnvFile[];
+    onOpenEnvTab?: (envName: string) => void;
 }
 
-export function RequestEditor({ requestId, collectionRelPath, workspacePath }: RequestEditorProps) {
+export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab }: RequestEditorProps) {
     const [details, setDetails] = useState<RequestDetails | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -433,12 +489,13 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath }: R
                     )}
                 </div>
 
-                <input
-                    type="text"
+                <EnvVarInput
                     value={url}
-                    onChange={(e) => handleUrlChange(e.target.value)}
-                    className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-[13px] outline-none transition-shadow duration-150 focus:ring-1 focus:ring-ring/40"
+                    onChange={handleUrlChange}
                     placeholder="Enter request URL"
+                    className="flex-1"
+                    environments={environments ?? []}
+                    onOpenEnvTab={onOpenEnvTab}
                 />
 
                 <button
@@ -488,6 +545,8 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath }: R
                                 onUpdate={handleParamUpdate}
                                 onRemove={handleParamRemove}
                                 onAdd={handleParamAdd}
+                                environments={environments}
+                                onOpenEnvTab={onOpenEnvTab}
                             />
                         </div>
                     )}
@@ -501,6 +560,8 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath }: R
                                 onUpdate={handleHeaderUpdate}
                                 onRemove={handleHeaderRemove}
                                 onAdd={handleHeaderAdd}
+                                environments={environments}
+                                onOpenEnvTab={onOpenEnvTab}
                             />
                         </div>
                     )}

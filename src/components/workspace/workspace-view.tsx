@@ -687,6 +687,8 @@ function WorkspaceContent() {
               requestId={activeRequest?.id ?? null}
               collectionRelPath={activeRequest?.collectionFile ?? null}
               workspacePath={folderPath}
+              environments={environments}
+              onOpenEnvTab={handleSelectEnv}
             />
           )}
         </div>
