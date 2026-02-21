@@ -6,6 +6,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvVariable {
+    pub index: usize,
     pub key: String,
     pub value: String,
     pub enabled: bool,
@@ -27,7 +28,7 @@ struct EnvState {
     #[serde(default)]
     enabled_files: Vec<String>,
     #[serde(default)]
-    disabled_vars: HashMap<String, Vec<String>>,
+    disabled_var_indexes: HashMap<String, Vec<usize>>,
 }
 
 fn env_dir(workspace_path: &str) -> std::path::PathBuf {
@@ -57,21 +58,33 @@ fn write_state(workspace_path: &str, state: &EnvState) -> Result<(), String> {
     fs::write(path, content).map_err(|e| format!("Failed to write state: {e}"))
 }
 
-fn parse_env_content(content: &str, disabled_keys: &[String]) -> Vec<EnvVariable> {
-    content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() && !trimmed.starts_with('#')
-        })
-        .filter_map(|line| {
-            let (key, value) = line.split_once('=')?;
-            let key = key.trim().to_string();
-            let value = value.trim().to_string();
-            let enabled = !disabled_keys.contains(&key);
-            Some(EnvVariable { key, value, enabled })
-        })
-        .collect()
+fn parse_env_content(content: &str, disabled_indexes: &[usize]) -> Vec<EnvVariable> {
+    let mut out = vec![];
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+
+        let index = out.len();
+        let key = key.trim().to_string();
+        let value = value.trim().to_string();
+        let enabled = !disabled_indexes.contains(&index);
+
+        out.push(EnvVariable {
+            index,
+            key,
+            value,
+            enabled,
+        });
+    }
+
+    out
 }
 
 fn all_env_names(workspace_path: &str) -> Vec<String> {
@@ -118,12 +131,12 @@ pub fn list_environments(workspace_path: &str) -> Result<Vec<EnvFileInfo>, Strin
             let content = fs::read_to_string(&path)
                 .map_err(|e| format!("Failed to read {path:?}: {e}"))?;
 
-            let disabled_keys = state
-                .disabled_vars
+            let disabled_indexes = state
+                .disabled_var_indexes
                 .get(&name)
                 .cloned()
                 .unwrap_or_default();
-            let variables = parse_env_content(&content, &disabled_keys);
+            let variables = parse_env_content(&content, &disabled_indexes);
 
             // When state has never been written, treat every file as enabled.
             let is_enabled = if state.enabled_files.is_empty() {
@@ -171,23 +184,25 @@ pub fn toggle_env_file(
 pub fn toggle_env_variable(
     workspace_path: &str,
     env_name: &str,
-    key: &str,
+    index: usize,
     enabled: bool,
 ) -> Result<(), String> {
     let mut state = read_state(workspace_path);
+
     let disabled = state
-        .disabled_vars
+        .disabled_var_indexes
         .entry(env_name.to_string())
         .or_default();
 
     if enabled {
-        disabled.retain(|k| k != key);
-    } else if !disabled.contains(&key.to_string()) {
-        disabled.push(key.to_string());
+        disabled.retain(|i| *i != index);
+    } else if !disabled.contains(&index) {
+        disabled.push(index);
+        disabled.sort_unstable();
     }
 
     if disabled.is_empty() {
-        state.disabled_vars.remove(env_name);
+        state.disabled_var_indexes.remove(env_name);
     }
 
     write_state(workspace_path, &state)
@@ -217,19 +232,19 @@ pub fn add_env_variable(
     fs::write(&env_path, &content).map_err(|e| format!("Failed to write env file: {e}"))?;
 
     let state = read_state(workspace_path);
-    let disabled_keys = state
-        .disabled_vars
+    let disabled_indexes = state
+        .disabled_var_indexes
         .get(env_name)
         .cloned()
         .unwrap_or_default();
-    Ok(parse_env_content(&content, &disabled_keys))
+    Ok(parse_env_content(&content, &disabled_indexes))
 }
 
 #[tauri::command]
 pub fn update_env_variable(
     workspace_path: &str,
     env_name: &str,
-    old_key: &str,
+    index: usize,
     new_key: &str,
     new_value: &str,
 ) -> Result<Vec<EnvVariable>, String> {
@@ -242,46 +257,51 @@ pub fn update_env_variable(
     let content =
         fs::read_to_string(&env_path).map_err(|e| format!("Failed to read env file: {e}"))?;
 
+    let mut variable_index = 0usize;
+    let mut replaced = false;
     let new_content: String = content
         .lines()
         .map(|line| {
-            if let Some((key, _)) = line.split_once('=') {
-                if key.trim() == old_key {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return line.to_string();
+            }
+
+            if line.split_once('=').is_some() {
+                let current = variable_index;
+                variable_index += 1;
+                if current == index {
+                    replaced = true;
                     return format!("{new_key}={new_value}");
                 }
             }
+
             line.to_string()
         })
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
 
-    fs::write(&env_path, &new_content).map_err(|e| format!("Failed to write env file: {e}"))?;
-
-    if old_key != new_key {
-        let mut state = read_state(workspace_path);
-        if let Some(disabled) = state.disabled_vars.get_mut(env_name) {
-            if let Some(pos) = disabled.iter().position(|k| k == old_key) {
-                disabled[pos] = new_key.to_string();
-            }
-        }
-        write_state(workspace_path, &state)?;
+    if !replaced {
+        return Err(format!("Variable index out of bounds: {index}"));
     }
 
+    fs::write(&env_path, &new_content).map_err(|e| format!("Failed to write env file: {e}"))?;
+
     let state = read_state(workspace_path);
-    let disabled_keys = state
-        .disabled_vars
+    let disabled_indexes = state
+        .disabled_var_indexes
         .get(env_name)
         .cloned()
         .unwrap_or_default();
-    Ok(parse_env_content(&new_content, &disabled_keys))
+    Ok(parse_env_content(&new_content, &disabled_indexes))
 }
 
 #[tauri::command]
 pub fn delete_env_variable(
     workspace_path: &str,
     env_name: &str,
-    key: &str,
+    index: usize,
 ) -> Result<Vec<EnvVariable>, String> {
     let env_path = env_dir(workspace_path).join(format!("{env_name}.env"));
 
@@ -292,34 +312,128 @@ pub fn delete_env_variable(
     let content =
         fs::read_to_string(&env_path).map_err(|e| format!("Failed to read env file: {e}"))?;
 
+    let mut variable_index = 0usize;
+    let mut removed = false;
     let new_content: String = content
         .lines()
-        .filter(|line| {
-            if let Some((k, _)) = line.split_once('=') {
-                k.trim() != key
-            } else {
-                true
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return Some(line.to_string());
             }
+
+            if line.split_once('=').is_some() {
+                let current = variable_index;
+                variable_index += 1;
+                if current == index {
+                    removed = true;
+                    return None;
+                }
+            }
+
+            Some(line.to_string())
         })
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
 
+    if !removed {
+        return Err(format!("Variable index out of bounds: {index}"));
+    }
+
     fs::write(&env_path, &new_content).map_err(|e| format!("Failed to write env file: {e}"))?;
 
     let mut state = read_state(workspace_path);
-    if let Some(disabled) = state.disabled_vars.get_mut(env_name) {
-        disabled.retain(|k| k != key);
-        if disabled.is_empty() {
-            state.disabled_vars.remove(env_name);
+
+    if let Some(disabled_indexes) = state.disabled_var_indexes.get_mut(env_name) {
+        disabled_indexes.retain(|i| *i != index);
+        for i in disabled_indexes.iter_mut() {
+            if *i > index {
+                *i -= 1;
+            }
+        }
+        if disabled_indexes.is_empty() {
+            state.disabled_var_indexes.remove(env_name);
         }
     }
     write_state(workspace_path, &state)?;
 
-    let disabled_keys = state
-        .disabled_vars
+    let disabled_indexes = state
+        .disabled_var_indexes
         .get(env_name)
         .cloned()
         .unwrap_or_default();
-    Ok(parse_env_content(&new_content, &disabled_keys))
+    Ok(parse_env_content(&new_content, &disabled_indexes))
+}
+
+#[tauri::command]
+pub fn create_env_file(
+    workspace_path: &str,
+    env_name: &str,
+) -> Result<(), String> {
+    let dir = env_dir(workspace_path);
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create environments dir: {e}"))?;
+
+    let env_path = dir.join(format!("{env_name}.env"));
+    if env_path.exists() {
+        return Err(format!("Environment already exists: {env_name}"));
+    }
+
+    fs::write(&env_path, "").map_err(|e| format!("Failed to create env file: {e}"))?;
+
+    let mut state = read_state(workspace_path);
+    if state.enabled_files.is_empty() {
+        state.enabled_files = all_env_names(workspace_path);
+    } else if !state.enabled_files.contains(&env_name.to_string()) {
+        state.enabled_files.push(env_name.to_string());
+    }
+    write_state(workspace_path, &state)
+}
+
+#[tauri::command]
+pub fn rename_env_file(
+    workspace_path: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    let dir = env_dir(workspace_path);
+    let old_path = dir.join(format!("{old_name}.env"));
+    let new_path = dir.join(format!("{new_name}.env"));
+
+    if !old_path.exists() {
+        return Err(format!("Environment not found: {old_name}"));
+    }
+    if new_path.exists() {
+        return Err(format!("Environment already exists: {new_name}"));
+    }
+
+    fs::rename(&old_path, &new_path)
+        .map_err(|e| format!("Failed to rename env file: {e}"))?;
+
+    let mut state = read_state(workspace_path);
+    if let Some(pos) = state.enabled_files.iter().position(|f| f == old_name) {
+        state.enabled_files[pos] = new_name.to_string();
+    }
+    if let Some(indexes) = state.disabled_var_indexes.remove(old_name) {
+        state.disabled_var_indexes.insert(new_name.to_string(), indexes);
+    }
+    write_state(workspace_path, &state)
+}
+
+#[tauri::command]
+pub fn delete_env_file(
+    workspace_path: &str,
+    env_name: &str,
+) -> Result<(), String> {
+    let env_path = env_dir(workspace_path).join(format!("{env_name}.env"));
+    if !env_path.exists() {
+        return Err(format!("Environment not found: {env_name}"));
+    }
+
+    fs::remove_file(&env_path).map_err(|e| format!("Failed to delete env file: {e}"))?;
+
+    let mut state = read_state(workspace_path);
+    state.enabled_files.retain(|f| f != env_name);
+    state.disabled_var_indexes.remove(env_name);
+    write_state(workspace_path, &state)
 }

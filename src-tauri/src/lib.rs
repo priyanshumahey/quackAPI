@@ -80,6 +80,9 @@ pub fn run() {
             commands::add_env_variable,
             commands::update_env_variable,
             commands::delete_env_variable,
+            commands::create_env_file,
+            commands::rename_env_file,
+            commands::delete_env_file,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
