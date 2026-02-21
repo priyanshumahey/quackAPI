@@ -83,6 +83,7 @@ pub fn run() {
             commands::create_env_file,
             commands::rename_env_file,
             commands::delete_env_file,
+            commands::list_collections,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

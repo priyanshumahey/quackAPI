@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 import { ResizablePanel } from "@/components/ui/resizable-panel";
 import { useWorkspace } from "@/context";
 import {
+  listCollections,
+  type CollectionRequestSummary,
+  type CollectionTreeItem,
+} from "@/lib/collections";
+import {
   addEnvVariable,
   createEnvFile,
   deleteEnvFile,
@@ -21,11 +26,6 @@ import { ActivityBar, type ActivityTab } from "./activity-bar";
 import { CollectionPanel } from "./collection-panel";
 import { EnvironmentEditor } from "./environment-editor";
 import { EnvironmentPanel } from "./environment-panel";
-import {
-  MOCK_COLLECTIONS,
-  type MockFolder,
-  type MockRequest,
-} from "./mock-data";
 import { RequestEditor } from "./request-editor";
 import {
   RequestTabBar,
@@ -35,14 +35,16 @@ import {
 } from "./request-tab-bar";
 
 function findRequestInTree(
-  items: (MockFolder | MockRequest)[],
+  items: CollectionTreeItem[],
   id: string
-): MockRequest | null {
+): CollectionRequestSummary | null {
   for (const item of items) {
-    if (item.type === "request" && item.id === id) return item;
     if (item.type === "folder") {
       const found = findRequestInTree(item.children, id);
       if (found) return found;
+    } else {
+      const req = item.requests.find((r) => r.id === id);
+      if (req) return req;
     }
   }
   return null;
@@ -70,6 +72,7 @@ function WorkspaceContent() {
   const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [environments, setEnvironments] = useState<EnvFile[]>([]);
+  const [collections, setCollections] = useState<CollectionTreeItem[]>([]);
 
   const loadEnvs = useCallback(async () => {
     if (!folderPath) return;
@@ -81,14 +84,25 @@ function WorkspaceContent() {
     }
   }, [folderPath]);
 
+  const loadCollections = useCallback(async () => {
+    if (!folderPath) return;
+    try {
+      const cols = await listCollections(folderPath);
+      setCollections(cols);
+    } catch (err) {
+      console.error("Failed to load collections", err);
+    }
+  }, [folderPath]);
+
   useEffect(() => {
     loadEnvs();
-  }, [loadEnvs]);
+    loadCollections();
+  }, [loadEnvs, loadCollections]);
 
   const handleSelectRequest = useCallback(
     (id: string) => {
       if (!openTabs.some((t) => t.id === id)) {
-        const req = findRequestInTree(MOCK_COLLECTIONS, id);
+        const req = findRequestInTree(collections, id);
         if (req) {
           const newTab: RequestTabItem = {
             id: req.id,
@@ -101,7 +115,7 @@ function WorkspaceContent() {
       }
       setActiveTabId(id);
     },
-    [openTabs]
+    [openTabs, collections]
   );
 
   const handleSelectEnv = useCallback(
@@ -292,7 +306,7 @@ function WorkspaceContent() {
 
   const activeRequest =
     activeTab?.kind === "request"
-      ? findRequestInTree(MOCK_COLLECTIONS, activeTab.id)
+      ? findRequestInTree(collections, activeTab.id)
       : null;
 
   const activeEnvName =
@@ -326,12 +340,14 @@ function WorkspaceContent() {
         onTabChange={setActiveActivity}
         onRefresh={() => {
           loadEnvs();
+          loadCollections();
         }}
       />
 
       <ResizablePanel defaultWidth={260} minWidth={180} maxWidth={420}>
         {activeActivity === "collections" && (
           <CollectionPanel
+            collections={collections}
             selectedRequestId={activeTab?.kind === "request" ? activeTabId : null}
             onSelectRequest={handleSelectRequest}
           />
