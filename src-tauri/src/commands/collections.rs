@@ -26,6 +26,8 @@ struct CollectionFileRequest {
     params: Vec<serde_json::Value>,
     #[serde(default)]
     body: Option<serde_json::Value>,
+    #[serde(default)]
+    settings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -213,6 +215,7 @@ pub fn create_collection(
             headers: vec![],
             params: vec![],
             body: Some(serde_json::json!({"type": "none", "content": ""})),
+            settings: None,
         }],
     };
 
@@ -306,6 +309,7 @@ pub fn add_request_to_collection(
         headers: vec![],
         params: vec![],
         body: Some(serde_json::json!({"type": "none", "content": ""})),
+        settings: None,
     });
 
     let new_content = serde_json::to_string_pretty(&col)
@@ -498,6 +502,14 @@ pub struct RequestDetails {
     pub headers: Vec<RequestHeaderDetail>,
     pub params: Vec<RequestParamDetail>,
     pub body: RequestBodyDetail,
+    pub settings: RequestSettingsDetail,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestSettingsDetail {
+    pub verify_ssl: bool,
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -573,6 +585,26 @@ fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
         },
     };
 
+    let settings = match &req.settings {
+        Some(s) => {
+            let obj = s.as_object();
+            RequestSettingsDetail {
+                verify_ssl: obj
+                    .and_then(|o| o.get("verifySsl"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                proxy_url: obj
+                    .and_then(|o| o.get("proxyUrl"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            }
+        }
+        None => RequestSettingsDetail {
+            verify_ssl: false,
+            proxy_url: None,
+        },
+    };
+
     RequestDetails {
         id: req.id.clone(),
         name: req.name.clone(),
@@ -581,6 +613,7 @@ fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
         headers,
         params,
         body,
+        settings,
     }
 }
 
@@ -617,6 +650,7 @@ pub struct UpdateRequestPayload {
     pub headers: Option<Vec<serde_json::Value>>,
     pub params: Option<Vec<serde_json::Value>>,
     pub body: Option<serde_json::Value>,
+    pub settings: Option<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -656,6 +690,9 @@ pub fn update_request(
     }
     if let Some(body) = payload.body {
         req.body = Some(body);
+    }
+    if let Some(settings) = payload.settings {
+        req.settings = Some(settings);
     }
 
     let new_content = serde_json::to_string_pretty(&col)

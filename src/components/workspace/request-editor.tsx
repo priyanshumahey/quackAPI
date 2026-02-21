@@ -8,7 +8,7 @@ import {
     type RequestHeaderDetail,
     type RequestParamDetail,
 } from "@/lib/collections";
-import { sendHttpRequest, type HttpResponse } from "@/lib/http";
+import { sendHttpRequest, cancelHttpRequest, type HttpResponse } from "@/lib/http";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { EnvFile } from "@/lib/environments";
@@ -235,6 +235,8 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
     const [params, setParams] = useState<KVRow[]>([]);
     const [bodyType, setBodyType] = useState("none");
     const [bodyContent, setBodyContent] = useState("");
+    const [verifySsl, setVerifySsl] = useState(false);
+    const [proxyUrl, setProxyUrl] = useState("");
 
     const [activeRequestTab, setActiveRequestTab] = useState<RequestTab>("params");
     const [activeResponseTab, setActiveResponseTab] = useState<ResponseTab>("pretty");
@@ -243,8 +245,11 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
     // Response state
     const [responseData, setResponseData] = useState<HttpResponse | null>(null);
     const [isSending, setIsSending] = useState(false);
+    const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
     const [sendError, setSendError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+    const [progress, setProgress] = useState<{ bytesRead: number; totalBytes: number | null } | null>(null);
+    const [streamingBody, setStreamingBody] = useState<string>("");
 
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -277,6 +282,8 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 );
                 setBodyType(data.body.type);
                 setBodyContent(data.body.content);
+                setVerifySsl(data.settings?.verifySsl ?? false);
+                setProxyUrl(data.settings?.proxyUrl ?? "");
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -406,6 +413,22 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
         [scheduleSave, bodyType]
     );
 
+    const handleVerifySslChange = useCallback(
+        (val: boolean) => {
+            setVerifySsl(val);
+            scheduleSave({ settings: { verifySsl: val, proxyUrl } });
+        },
+        [scheduleSave, proxyUrl]
+    );
+
+    const handleProxyUrlChange = useCallback(
+        (val: string) => {
+            setProxyUrl(val);
+            scheduleSave({ settings: { verifySsl, proxyUrl: val } });
+        },
+        [scheduleSave, verifySsl]
+    );
+
     // ── Send request handler ────────────────────────────────────────────
     const handleSend = useCallback(async () => {
         if (!url.trim()) return;
@@ -413,11 +436,41 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
         const envs = environments ?? [];
         const sub = (text: string) => substituteEnvVars(text, envs);
 
+        const reqId = crypto.randomUUID();
+        setCurrentRequestId(reqId);
         setIsSending(true);
         setSendError(null);
+        setProgress(null);
+        setStreamingBody("");
+
+        let unlistenProgress: (() => void) | null = null;
+        let unlistenChunk: (() => void) | null = null;
 
         try {
+            const { listen } = await import("@tauri-apps/api/event");
+            unlistenProgress = await listen<{ requestId: string; bytesRead: number; totalBytes: number | null }>(
+                "http-progress",
+                (event) => {
+                    if (event.payload.requestId === reqId) {
+                        setProgress({
+                            bytesRead: event.payload.bytesRead,
+                            totalBytes: event.payload.totalBytes,
+                        });
+                    }
+                }
+            );
+            unlistenChunk = await listen<{ requestId: string; chunk: string }>(
+                "http-chunk",
+                (event) => {
+                    if (event.payload.requestId === reqId) {
+                        setStreamingBody((prev) => prev + event.payload.chunk);
+                        setIsCollapsed(false);
+                    }
+                }
+            );
+
             const result = await sendHttpRequest({
+                requestId: reqId,
                 method,
                 url: sub(url),
                 headers: headers
@@ -427,8 +480,10 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                     .filter((p) => p.key.trim() !== "" || p.value.trim() !== "")
                     .map((p) => ({ key: sub(p.key), value: sub(p.value), enabled: p.enabled })),
                 body: { type: bodyType, content: sub(bodyContent) },
+                settings: { verifySsl, proxyUrl: proxyUrl.trim() || null },
             });
             setResponseData(result);
+            setStreamingBody("");
             setIsCollapsed(false);
         } catch (err: unknown) {
             let msg: string;
@@ -443,15 +498,31 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
             }
             setSendError(msg);
             setResponseData(null);
+            setStreamingBody("");
             setIsCollapsed(false);
         } finally {
+            if (unlistenProgress) unlistenProgress();
+            if (unlistenChunk) unlistenChunk();
             setIsSending(false);
+            setCurrentRequestId(null);
+            setProgress(null);
         }
-    }, [method, url, headers, params, bodyType, bodyContent, environments]);
+    }, [method, url, headers, params, bodyType, bodyContent, environments, verifySsl, proxyUrl]);
+
+    const handleCancel = useCallback(async () => {
+        if (currentRequestId) {
+            try {
+                await cancelHttpRequest(currentRequestId);
+            } catch (err) {
+                console.error("Failed to cancel request:", err);
+            }
+        }
+    }, [currentRequestId]);
 
     // Formatted response for Pretty tab
     const prettyResponse = useMemo(() => {
         if (!responseData) return null;
+        if (responseData.isBinary) return { formatted: "<Binary Data>", isJson: false };
         return tryPrettyJson(responseData.body);
     }, [responseData]);
 
@@ -599,24 +670,34 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                     onOpenEnvTab={onOpenEnvTab}
                 />
 
-                <button
-                    onClick={handleSend}
-                    disabled={isSending}
-                    className={cn(
-                        "flex h-8 items-center gap-2 rounded-lg px-4 text-[13px] font-medium text-white",
-                        "transition-all duration-150 cursor-pointer shadow-sm",
-                        "hover:shadow-md active:scale-[0.98]",
-                        isSending && "opacity-70 pointer-events-none",
-                        METHOD_BG[method]
-                    )}
-                >
-                    {isSending ? (
+                {isSending ? (
+                    <button
+                        onClick={handleCancel}
+                        className={cn(
+                            "flex h-8 items-center gap-2 rounded-lg px-4 text-[13px] font-medium text-white",
+                            "transition-all duration-150 cursor-pointer shadow-sm",
+                            "hover:shadow-md active:scale-[0.98]",
+                            "bg-red-600 hover:bg-red-700"
+                        )}
+                    >
                         <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
+                        Cancel
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleSend}
+                        disabled={isSending}
+                        className={cn(
+                            "flex h-8 items-center gap-2 rounded-lg px-4 text-[13px] font-medium text-white",
+                            "transition-all duration-150 cursor-pointer shadow-sm",
+                            "hover:shadow-md active:scale-[0.98]",
+                            METHOD_BG[method]
+                        )}
+                    >
                         <Send className="size-3.5" />
-                    )}
-                    {isSending ? "Sending…" : "Send"}
-                </button>
+                        Send
+                    </button>
+                )}
             </div>
 
             <div className="flex flex-1 flex-col overflow-hidden">
@@ -714,8 +795,41 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                         </div>
                     )}
                     {activeRequestTab === "settings" && (
-                        <div className="p-4 text-sm text-muted-foreground/50 italic">
-                            Request settings will appear here.
+                        <div className="p-4 space-y-6">
+                            <div>
+                                <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                                    Security
+                                </h3>
+                                <label className="flex items-center gap-2 text-[13px] text-foreground/80 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={verifySsl}
+                                        onChange={(e) => handleVerifySslChange(e.target.checked)}
+                                        className="accent-primary size-3.5"
+                                    />
+                                    Verify SSL Certificates
+                                </label>
+                                <p className="mt-1 text-[11px] text-muted-foreground/50 ml-5.5">
+                                    When disabled, invalid or self-signed certificates will be accepted.
+                                </p>
+                            </div>
+                            <div>
+                                <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                                    Proxy
+                                </h3>
+                                <div className="max-w-md">
+                                    <input
+                                        type="text"
+                                        value={proxyUrl}
+                                        onChange={(e) => handleProxyUrlChange(e.target.value)}
+                                        placeholder="e.g. http://127.0.0.1:8080"
+                                        className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                    />
+                                    <p className="mt-1.5 text-[11px] text-muted-foreground/50">
+                                        Leave blank to use no proxy. Supports HTTP, HTTPS, and SOCKS5.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -781,8 +895,8 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                                             const text = activeResponseTab === "headers"
                                                 ? responseData.headers.map((h) => `${h.key}: ${h.value}`).join("\n")
                                                 : activeResponseTab === "pretty"
-                                                    ? (prettyResponse?.formatted ?? responseData.body)
-                                                    : responseData.body;
+                                                    ? (prettyResponse?.formatted ?? (responseData.isBinary ? responseData.bodyBase64 : responseData.body))
+                                                    : (responseData.isBinary ? responseData.bodyBase64 : responseData.body);
                                             navigator.clipboard.writeText(text).then(() => {
                                                 setCopied(true);
                                                 setTimeout(() => setCopied(false), 1500);
@@ -822,8 +936,38 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                     {!isCollapsed && (
                       <ScrollArea className="min-h-0 flex-1 bg-muted/20">
                           {isSending ? (
-                              <div className="flex h-full items-center justify-center p-8">
-                                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                              <div className="flex flex-col h-full">
+                                  <div className="flex items-center gap-3 px-4 py-3 border-b border-border/50">
+                                      <Loader2 className="size-4 animate-spin text-muted-foreground shrink-0" />
+                                      {progress && (
+                                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                                              <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden shrink-0">
+                                                  <div 
+                                                      className={cn(
+                                                          "h-full bg-primary transition-all duration-200",
+                                                          !progress.totalBytes && "animate-pulse"
+                                                      )}
+                                                      style={{ 
+                                                          width: progress.totalBytes 
+                                                              ? `${Math.min(100, (progress.bytesRead / progress.totalBytes) * 100)}%` 
+                                                              : '100%'
+                                                      }}
+                                                  />
+                                              </div>
+                                              <span className="text-[11px] text-muted-foreground/70 whitespace-nowrap">
+                                                  {formatBytes(progress.bytesRead)} {progress.totalBytes ? `/ ${formatBytes(progress.totalBytes)}` : 'downloaded'}
+                                              </span>
+                                          </div>
+                                      )}
+                                      {!progress && (
+                                          <span className="text-[12px] text-muted-foreground/60">Sending request…</span>
+                                      )}
+                                  </div>
+                                  {streamingBody && (
+                                      <pre className="whitespace-pre-wrap break-all p-4 font-mono text-[13px] leading-relaxed text-foreground/90 select-text flex-1">
+                                          {streamingBody}
+                                      </pre>
+                                  )}
                               </div>
                           ) : sendError ? (
                               <div className="p-4">
@@ -864,13 +1008,13 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                                                   className: "hover:bg-muted/30 transition-colors",
                                               })}
                                           >
-                                              {prettyResponse?.formatted ?? responseData.body}
+                                              {prettyResponse?.formatted ?? (responseData.isBinary ? responseData.bodyBase64 : responseData.body)}
                                           </SyntaxHighlighter>
                                       </div>
                                   )}
                                   {activeResponseTab === "raw" && (
                                       <pre className="whitespace-pre-wrap break-all p-4 font-mono text-[13px] leading-relaxed text-foreground/90 select-text">
-                                          {responseData.body}
+                                          {responseData.isBinary ? responseData.bodyBase64 : responseData.body}
                                       </pre>
                                   )}
                                   {activeResponseTab === "headers" && (

@@ -32,6 +32,10 @@ export interface RequestDetails {
     headers: RequestHeaderDetail[];
     params: RequestParamDetail[];
     body: RequestBodyDetail;
+    settings: {
+        verifySsl: boolean;
+        proxyUrl: string | null;
+    };
 }
 
 export interface UpdateRequestPayload {
@@ -40,6 +44,7 @@ export interface UpdateRequestPayload {
     headers?: { key: string; value: string; enabled: boolean }[];
     params?: { key: string; value: string; enabled: boolean }[];
     body?: { type: string; content: string };
+    settings?: { verifySsl: boolean; proxyUrl: string | null };
 }
 
 export interface CollectionFolder {

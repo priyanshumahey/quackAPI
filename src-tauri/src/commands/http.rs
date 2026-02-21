@@ -1,9 +1,45 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::oneshot;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+pub struct HttpClientState {
+    pub client: reqwest::Client,
+    pub active_requests: Mutex<HashMap<String, oneshot::Sender<()>>>,
+}
+
+impl HttpClientState {
+    pub fn new() -> Self {
+        let client = reqwest::Client::builder()
+            .http1_only()
+            .danger_accept_invalid_certs(true)
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .cookie_store(true)
+            .no_proxy()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .build()
+            .expect("Failed to build reqwest client");
+
+        Self {
+            client,
+            active_requests: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for HttpClientState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendRequestPayload {
+    pub request_id: String,
     pub method: String,
     pub url: String,
     pub headers: Vec<KvParam>,
@@ -32,6 +68,8 @@ pub struct HttpResponse {
     pub status_text: String,
     pub headers: Vec<ResponseHeader>,
     pub body: String,
+    pub body_base64: String,
+    pub is_binary: bool,
     pub time_ms: u64,
     pub size_bytes: u64,
 }
@@ -83,7 +121,23 @@ fn friendly_reqwest_error(e: &reqwest::Error) -> String {
 }
 
 #[tauri::command]
-pub async fn send_http_request(payload: SendRequestPayload) -> Result<HttpResponse, String> {
+pub async fn cancel_http_request(
+    request_id: String,
+    state: State<'_, HttpClientState>,
+) -> Result<(), String> {
+    let mut requests = state.active_requests.lock().map_err(|_| "Mutex poisoned")?;
+    if let Some(sender) = requests.remove(&request_id) {
+        let _ = sender.send(());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn send_http_request(
+    app: AppHandle,
+    payload: SendRequestPayload,
+    state: State<'_, HttpClientState>,
+) -> Result<HttpResponse, String> {
     let start = Instant::now();
 
     let url = ensure_scheme(&payload.url);
@@ -94,16 +148,7 @@ pub async fn send_http_request(payload: SendRequestPayload) -> Result<HttpRespon
         .parse()
         .map_err(|_| format!("Unsupported HTTP method: {}", payload.method))?;
 
-    let client = reqwest::Client::builder()
-        .http1_only()
-        .danger_accept_invalid_certs(true)
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .no_proxy()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
-    let mut builder = client.request(method, &url);
+    let mut builder = state.client.request(method, &url);
 
     let enabled_params: Vec<(&str, &str)> = payload
         .params
@@ -141,7 +186,32 @@ pub async fn send_http_request(payload: SendRequestPayload) -> Result<HttpRespon
         _ => {}
     }
 
-    let response = builder.send().await.map_err(|e| friendly_reqwest_error(&e))?;
+    let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+    {
+        let mut requests = state.active_requests.lock().map_err(|_| "Mutex poisoned")?;
+        requests.insert(payload.request_id.clone(), cancel_tx);
+    }
+
+    let request_future = builder.send();
+
+    let response_result = tokio::select! {
+        res = request_future => res,
+        _ = &mut cancel_rx => {
+            // Remove from active requests on cancel
+            let mut requests = state.active_requests.lock().unwrap();
+            requests.remove(&payload.request_id);
+            return Err("Request cancelled by user".to_string());
+        }
+    };
+
+    let response = match response_result {
+        Ok(res) => res,
+        Err(e) => {
+            let mut requests = state.active_requests.lock().unwrap();
+            requests.remove(&payload.request_id);
+            return Err(friendly_reqwest_error(&e));
+        }
+    };
     let elapsed = start.elapsed();
 
     let status = response.status().as_u16();
@@ -160,20 +230,79 @@ pub async fn send_http_request(payload: SendRequestPayload) -> Result<HttpRespon
         })
         .collect();
 
-    let body_bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response body: {e}"))?;
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
 
-    let size_bytes = u64::try_from(body_bytes.len()).unwrap_or(u64::MAX);
-    let body = String::from_utf8_lossy(&body_bytes).into_owned();
+    let is_binary = !content_type.starts_with("text/")
+        && !content_type.contains("json")
+        && !content_type.contains("xml")
+        && !content_type.contains("javascript")
+        && !content_type.is_empty();
+
+    let total_bytes = response.content_length();
+
+    let mut all_bytes: Vec<u8> = Vec::new();
+    let mut response = response;
+    loop {
+        let chunk_result = tokio::select! {
+            res = response.chunk() => res,
+            _ = &mut cancel_rx => {
+                let mut requests = state.active_requests.lock().unwrap();
+                requests.remove(&payload.request_id);
+                return Err("Request cancelled by user".to_string());
+            }
+        };
+
+        match chunk_result {
+            Ok(Some(chunk)) => {
+                all_bytes.extend_from_slice(&chunk);
+                let _ = app.emit("http-progress", serde_json::json!({
+                    "requestId": payload.request_id,
+                    "bytesRead": all_bytes.len() as u64,
+                    "totalBytes": total_bytes,
+                }));
+                if !is_binary {
+                    let chunk_text = String::from_utf8_lossy(&chunk).into_owned();
+                    let _ = app.emit("http-chunk", serde_json::json!({
+                        "requestId": payload.request_id,
+                        "chunk": chunk_text,
+                    }));
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                let mut requests = state.active_requests.lock().unwrap();
+                requests.remove(&payload.request_id);
+                return Err(format!("Failed to read response body: {e}"));
+            }
+        }
+    }
+
+    let size_bytes = u64::try_from(all_bytes.len()).unwrap_or(u64::MAX);
     let time_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+
+    let (body, body_base64) = if is_binary {
+        (String::new(), BASE64.encode(&all_bytes))
+    } else {
+        (String::from_utf8_lossy(&all_bytes).into_owned(), String::new())
+    };
+
+    {
+        let mut requests = state.active_requests.lock().unwrap();
+        requests.remove(&payload.request_id);
+    }
 
     Ok(HttpResponse {
         status,
         status_text,
         headers: response_headers,
         body,
+        body_base64,
+        is_binary,
         time_ms,
         size_bytes,
     })

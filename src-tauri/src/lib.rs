@@ -61,6 +61,7 @@ fn greet() -> String {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(AppExitControl::new())
+        .manage(commands::HttpClientState::new())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_stronghold::Builder::new(|_pass| todo!()).build())
         .plugin(tauri_plugin_opener::init())
@@ -100,6 +101,7 @@ pub fn run() {
             commands::read_folder_readme,
             commands::write_folder_readme,
             commands::send_http_request,
+            commands::cancel_http_request,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
