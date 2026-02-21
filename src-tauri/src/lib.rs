@@ -84,6 +84,16 @@ pub fn run() {
             commands::rename_env_file,
             commands::delete_env_file,
             commands::list_collections,
+            commands::create_collection_folder,
+            commands::create_collection,
+            commands::rename_collection_folder,
+            commands::rename_collection,
+            commands::delete_collection_item,
+            commands::add_request_to_collection,
+            commands::move_collection_item,
+            commands::move_request_to_collection,
+            commands::rename_request,
+            commands::delete_request,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

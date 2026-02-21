@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.quack-api.app",
   "build": {
-    "beforeDevCommand": "pnpm dev:next",
+    "beforeDevCommand": "bun dev:next",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "pnpm build:next",
+    "beforeBuildCommand": "bun build:next",
     "frontendDist": "../dist"
   },
   "app": {
