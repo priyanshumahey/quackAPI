@@ -4,7 +4,17 @@ import { Button } from "@/components/ui/button";
 import { ResizablePanel } from "@/components/ui/resizable-panel";
 import { useWorkspace } from "@/context";
 import {
+  addRequestToCollection,
+  createCollection,
+  createCollectionFolder,
+  deleteCollectionItem,
+  deleteRequest,
   listCollections,
+  moveCollectionItem,
+  moveRequestToCollection,
+  renameCollection,
+  renameCollectionFolder,
+  renameRequest,
   type CollectionRequestSummary,
   type CollectionTreeItem,
 } from "@/lib/collections";
@@ -116,6 +126,171 @@ function WorkspaceContent() {
       setActiveTabId(id);
     },
     [openTabs, collections]
+  );
+
+  // ── Collection CRUD handlers ──────────────────────────
+
+  const handleCreateFolder = useCallback(
+    async (parentRelPath: string, name: string) => {
+      if (!folderPath) return;
+      try {
+        await createCollectionFolder(folderPath, parentRelPath, name);
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to create folder", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleCreateCollection = useCallback(
+    async (parentRelPath: string, name: string) => {
+      if (!folderPath) return;
+      try {
+        await createCollection(folderPath, parentRelPath, name);
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to create collection", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleRenameFolder = useCallback(
+    async (relPath: string, newName: string) => {
+      if (!folderPath) return;
+      try {
+        await renameCollectionFolder(folderPath, relPath, newName);
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to rename folder", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleRenameCollection = useCallback(
+    async (relPath: string, newName: string) => {
+      if (!folderPath) return;
+      try {
+        await renameCollection(folderPath, relPath, newName);
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to rename collection", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleRenameRequest = useCallback(
+    async (requestId: string, collectionRelPath: string, newName: string) => {
+      if (!folderPath) return;
+      try {
+        await renameRequest(folderPath, collectionRelPath, requestId, newName);
+        setOpenTabs((prev) =>
+          prev.map((t) =>
+            t.id === requestId ? { ...t, name: newName } : t
+          )
+        );
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to rename request", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleDeleteCollectionItem = useCallback(
+    async (relPath: string) => {
+      if (!folderPath) return;
+      try {
+        await deleteCollectionItem(folderPath, relPath);
+        // Close any open tabs for requests in the deleted item
+        // (simplified: just reload; tabs pointing to missing requests will show empty)
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to delete collection item", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleDeleteRequest = useCallback(
+    async (requestId: string, collectionRelPath: string) => {
+      if (!folderPath) return;
+      try {
+        await deleteRequest(folderPath, collectionRelPath, requestId);
+        setOpenTabs((prev) => {
+          const next = prev.filter((t) => t.id !== requestId);
+          if (activeTabId === requestId) {
+            setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
+          }
+          return next;
+        });
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to delete request", err);
+      }
+    },
+    [folderPath, loadCollections, activeTabId]
+  );
+
+  const handleMoveCollectionItem = useCallback(
+    async (itemRelPath: string, destParentRelPath: string) => {
+      if (!folderPath) return;
+      if (!itemRelPath) {
+        console.error("handleMoveCollectionItem called without itemRelPath");
+        return;
+      }
+      try {
+        await moveCollectionItem(folderPath, itemRelPath, destParentRelPath);
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to move collection item", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleMoveRequest = useCallback(
+    async (requestId: string, sourceCollectionRelPath: string, destCollectionRelPath: string) => {
+      if (!folderPath) return;
+      if (!requestId || !sourceCollectionRelPath || !destCollectionRelPath) {
+        console.error("handleMoveRequest called with missing args", { requestId, sourceCollectionRelPath, destCollectionRelPath });
+        return;
+      }
+      try {
+        await moveRequestToCollection(folderPath, requestId, sourceCollectionRelPath, destCollectionRelPath);
+        await loadCollections();
+      } catch (err) {
+        console.error("Failed to move request", err);
+      }
+    },
+    [folderPath, loadCollections]
+  );
+
+  const handleAddRequest = useCallback(
+    async (collectionRelPath: string) => {
+      if (!folderPath) return;
+      if (!collectionRelPath) {
+        console.error("handleAddRequest called without a collectionRelPath");
+        return;
+      }
+      try {
+        const newId = await addRequestToCollection(
+          folderPath,
+          collectionRelPath,
+          "New Request",
+          "GET"
+        );
+        await loadCollections();
+        // Auto-open the new request in a tab
+        handleSelectRequest(newId);
+      } catch (err) {
+        console.error("Failed to add request", err);
+      }
+    },
+    [folderPath, loadCollections, handleSelectRequest]
   );
 
   const handleSelectEnv = useCallback(
@@ -350,6 +525,16 @@ function WorkspaceContent() {
             collections={collections}
             selectedRequestId={activeTab?.kind === "request" ? activeTabId : null}
             onSelectRequest={handleSelectRequest}
+            onCreateFolder={handleCreateFolder}
+            onCreateCollection={handleCreateCollection}
+            onRenameFolder={handleRenameFolder}
+            onRenameCollection={handleRenameCollection}
+            onRenameRequest={handleRenameRequest}
+            onDeleteItem={handleDeleteCollectionItem}
+            onDeleteRequest={handleDeleteRequest}
+            onMoveItem={handleMoveCollectionItem}
+            onMoveRequest={handleMoveRequest}
+            onAddRequest={handleAddRequest}
           />
         )}
         {activeActivity === "environments" && (
@@ -364,7 +549,7 @@ function WorkspaceContent() {
           />
         )}
         {activeActivity === "history" && (
-          <div className="flex h-full flex-col border-r border-border bg-sidebar select-none">
+          <div className="flex h-full flex-col border-r border-border bg-background select-none">
             <div className="flex items-center border-b border-border px-3 py-2.5">
               <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
                 History
