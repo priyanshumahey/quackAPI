@@ -94,6 +94,9 @@ pub fn run() {
             commands::move_request_to_collection,
             commands::rename_request,
             commands::delete_request,
+            commands::update_collection_description,
+            commands::read_folder_readme,
+            commands::write_folder_readme,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

@@ -8,6 +8,8 @@ struct CollectionFile {
     id: String,
     name: String,
     #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
     requests: Vec<CollectionFileRequest>,
 }
 
@@ -42,6 +44,7 @@ pub enum CollectionTreeItem {
         name: String,
         file_name: String,
         rel_path: String,
+        description: Option<String>,
         requests: Vec<CollectionRequestSummary>,
     },
 }
@@ -119,6 +122,7 @@ fn build_tree(dir: &Path, rel_prefix: &str) -> Vec<CollectionTreeItem> {
                 name: col.name,
                 file_name: file_name.clone(),
                 rel_path: rel_file,
+                description: col.description,
                 requests,
             });
         }
@@ -200,6 +204,7 @@ pub fn create_collection(
     let col = CollectionFile {
         id: Uuid::new_v4().to_string(),
         name: name.to_string(),
+        description: None,
         requests: vec![CollectionFileRequest {
             id: Uuid::new_v4().to_string(),
             name: "New Request".to_string(),
@@ -461,4 +466,62 @@ pub fn delete_request(
     let new_content = serde_json::to_string_pretty(&col)
         .map_err(|e| format!("Failed to serialize: {e}"))?;
     fs::write(&file, new_content).map_err(|e| format!("Failed to write: {e}"))
+}
+
+#[tauri::command]
+pub fn update_collection_description(
+    workspace_path: &str,
+    collection_rel_path: &str,
+    description: Option<String>,
+) -> Result<(), String> {
+    let base = collections_dir(workspace_path);
+    let file = base.join(collection_rel_path);
+    if !file.is_file() {
+        return Err(format!("Collection not found: {collection_rel_path}"));
+    }
+    let content = fs::read_to_string(&file).map_err(|e| format!("Failed to read: {e}"))?;
+    let mut col: CollectionFile =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid JSON: {e}"))?;
+    col.description = description;
+    let new_content = serde_json::to_string_pretty(&col)
+        .map_err(|e| format!("Failed to serialize: {e}"))?;
+    fs::write(&file, new_content).map_err(|e| format!("Failed to write: {e}"))
+}
+
+#[tauri::command]
+pub fn read_folder_readme(
+    workspace_path: &str,
+    folder_rel_path: &str,
+) -> Result<Option<String>, String> {
+    let base = collections_dir(workspace_path);
+    let dir = if folder_rel_path.is_empty() {
+        base
+    } else {
+        base.join(folder_rel_path)
+    };
+    let readme = dir.join("README.md");
+    if !readme.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&readme).map_err(|e| format!("Failed to read README: {e}"))?;
+    Ok(Some(content))
+}
+
+#[tauri::command]
+pub fn write_folder_readme(
+    workspace_path: &str,
+    folder_rel_path: &str,
+    content: &str,
+) -> Result<(), String> {
+    let base = collections_dir(workspace_path);
+    let dir = if folder_rel_path.is_empty() {
+        base
+    } else {
+        base.join(folder_rel_path)
+    };
+    if !dir.is_dir() {
+        return Err(format!("Folder not found: {folder_rel_path}"));
+    }
+    let readme = dir.join("README.md");
+    fs::write(&readme, content).map_err(|e| format!("Failed to write README: {e}"))
 }

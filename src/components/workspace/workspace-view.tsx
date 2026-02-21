@@ -16,7 +16,7 @@ import {
   renameCollectionFolder,
   renameRequest,
   type CollectionRequestSummary,
-  type CollectionTreeItem,
+  type CollectionTreeItem
 } from "@/lib/collections";
 import {
   addEnvVariable,
@@ -33,13 +33,17 @@ import {
 import { Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityBar, type ActivityTab } from "./activity-bar";
+import { CollectionDocView } from "./collection-doc-view";
 import { CollectionPanel } from "./collection-panel";
 import { EnvironmentEditor } from "./environment-editor";
 import { EnvironmentPanel } from "./environment-panel";
+import { FolderReadmeView } from "./folder-readme-view";
 import { RequestEditor } from "./request-editor";
 import {
   RequestTabBar,
+  type CollectionDocTabItem,
   type EnvironmentTabItem,
+  type FolderReadmeTabItem,
   type RequestTabItem,
   type TabItem,
 } from "./request-tab-bar";
@@ -309,6 +313,40 @@ function WorkspaceContent() {
     [openTabs]
   );
 
+  const handleSelectFolder = useCallback(
+    (relPath: string, name: string) => {
+      const tabId = `folder-readme-${relPath || "__root__"}`;
+      if (!openTabs.some((t) => t.id === tabId)) {
+        const newTab: FolderReadmeTabItem = {
+          id: tabId,
+          kind: "folder-readme",
+          name,
+          folderRelPath: relPath,
+        };
+        setOpenTabs((prev) => [...prev, newTab]);
+      }
+      setActiveTabId(tabId);
+    },
+    [openTabs]
+  );
+
+  const handleSelectCollection = useCallback(
+    (relPath: string, name: string, description: string | null) => {
+      const tabId = `collection-doc-${relPath}`;
+      if (!openTabs.some((t) => t.id === tabId)) {
+        const newTab: CollectionDocTabItem = {
+          id: tabId,
+          kind: "collection-doc",
+          name,
+          collectionRelPath: relPath,
+        };
+        setOpenTabs((prev) => [...prev, newTab]);
+      }
+      setActiveTabId(tabId);
+    },
+    [openTabs]
+  );
+
   const handleToggleEnv = useCallback(
     async (envName: string) => {
       if (!folderPath) return;
@@ -525,6 +563,8 @@ function WorkspaceContent() {
             collections={collections}
             selectedRequestId={activeTab?.kind === "request" ? activeTabId : null}
             onSelectRequest={handleSelectRequest}
+            onSelectFolder={handleSelectFolder}
+            onSelectCollection={handleSelectCollection}
             onCreateFolder={handleCreateFolder}
             onCreateCollection={handleCreateCollection}
             onRenameFolder={handleRenameFolder}
@@ -588,6 +628,43 @@ function WorkspaceContent() {
               onDeleteVariable={(index) =>
                 handleDeleteVariable(activeEnvironment.name, index)
               }
+            />
+          ) : activeTab?.kind === "folder-readme" && folderPath ? (
+            <FolderReadmeView
+              key={activeTab.id}
+              folderRelPath={activeTab.folderRelPath}
+              folderName={activeTab.name}
+              workspacePath={folderPath}
+            />
+          ) : activeTab?.kind === "collection-doc" && folderPath ? (
+            <CollectionDocView
+              key={activeTab.id}
+              collectionRelPath={activeTab.collectionRelPath}
+              collectionName={activeTab.name}
+              initialDescription={(() => {
+                const findCol = (items: CollectionTreeItem[]): string | null | undefined => {
+                  for (const item of items) {
+                    if (item.type === "collection" && item.relPath === activeTab.collectionRelPath) return item.description;
+                    if (item.type === "folder") { const r = findCol(item.children); if (r !== undefined) return r; }
+                  }
+                  return undefined;
+                };
+                return findCol(collections) ?? null;
+              })()}
+              workspacePath={folderPath}
+              onDescriptionChange={(desc) => {
+                setCollections(prev => {
+                  const update = (items: CollectionTreeItem[]): CollectionTreeItem[] =>
+                    items.map(item =>
+                      item.type === "folder"
+                        ? { ...item, children: update(item.children) }
+                        : item.relPath === activeTab.collectionRelPath
+                          ? { ...item, description: desc }
+                          : item
+                    );
+                  return update(prev);
+                });
+              }}
             />
           ) : (
             <RequestEditor requestName={activeRequest?.name ?? null} />

@@ -20,6 +20,7 @@ import {
     type DragStartEvent,
 } from "@dnd-kit/core";
 import {
+    BookOpen,
     ChevronRight,
     Download,
     FileJson,
@@ -68,6 +69,7 @@ function ItemContextMenu({
     onRename,
     onDelete,
     onAddRequest,
+    onOpenDocs,
     menuRef,
 }: {
     isOpen: boolean;
@@ -75,6 +77,7 @@ function ItemContextMenu({
     onRename: () => void;
     onDelete: () => void;
     onAddRequest?: () => void;
+    onOpenDocs?: () => void;
     menuRef: React.RefObject<HTMLDivElement | null>;
 }) {
     useEffect(() => {
@@ -100,6 +103,14 @@ function ItemContextMenu({
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
                 >
                     <SendHorizontal className="size-3.5" /> New Request
+                </button>
+            )}
+            {onOpenDocs && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onClose(); onOpenDocs(); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
+                >
+                    <BookOpen className="size-3.5" /> Open Docs
                 </button>
             )}
             <button
@@ -349,6 +360,7 @@ function CollectionItem({
     onSelect,
     openFolders,
     onToggleFolder,
+    onSelectCollection,
     renamingId,
     onStartRename,
     onCommitRename,
@@ -362,6 +374,7 @@ function CollectionItem({
     onSelect: (id: string) => void;
     openFolders: Set<string>;
     onToggleFolder: (id: string) => void;
+    onSelectCollection?: (relPath: string, name: string, description: string | null) => void;
     renamingId: string | null;
     onStartRename: (id: string) => void;
     onCommitRename: (newName: string) => void;
@@ -390,36 +403,41 @@ function CollectionItem({
                             )}
                             style={{ paddingLeft: `${depth * 14 + 10}px` }}
                         >
-                            <button
-                                onClick={() => onToggleFolder(item.id)}
-                                className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
-                            >
-                                <ChevronRight
-                                    className={cn(
-                                        "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                                        isOpen && "rotate-90"
-                                    )}
-                                />
-                                {isOpen ? (
-                                    <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
-                                ) : (
-                                    <FolderClosed className="size-3.5 shrink-0 text-muted-foreground" />
-                                )}
-                                {isRenaming ? (
-                                    <InlineRenameInput
-                                        defaultValue={item.name}
-                                        onCommit={onCommitRename}
-                                        onCancel={onCancelRename}
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onToggleFolder(item.id); }}
+                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground cursor-pointer"
+                                >
+                                    <ChevronRight
+                                        className={cn(
+                                            "size-3.5 transition-transform duration-150",
+                                            isOpen && "rotate-90"
+                                        )}
                                     />
-                                ) : (
-                                    <span className="truncate font-medium text-foreground/90">{item.name}</span>
-                                )}
-                                {!isRenaming && (
-                                    <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
-                                        {item.requests.length}
-                                    </span>
-                                )}
-                            </button>
+                                </button>
+                                <button
+                                    onClick={() => onToggleFolder(item.id)}
+                                    className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
+                                >
+                                    {isOpen ? (
+                                        <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                                    ) : (
+                                        <FolderClosed className="size-3.5 shrink-0 text-muted-foreground" />
+                                    )}
+                                    {isRenaming ? (
+                                        <InlineRenameInput
+                                            defaultValue={item.name}
+                                            onCommit={onCommitRename}
+                                            onCancel={onCancelRename}
+                                        />
+                                    ) : (
+                                        <span className="truncate font-medium text-foreground/90">{item.name}</span>
+                                    )}
+                                    {!isRenaming && (
+                                        <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
+                                            {item.requests.length}
+                                        </span>
+                                    )}
+                                </button>
                             {!isRenaming && (
                                 <div className="relative">
                                     <button
@@ -438,6 +456,7 @@ function CollectionItem({
                                         onRename={() => onStartRename(item.id)}
                                         onDelete={() => onDelete(item.relPath)}
                                         onAddRequest={() => onAddRequest(item.relPath)}
+                                        onOpenDocs={() => onSelectCollection?.(item.relPath, item.name, item.description)}
                                         menuRef={menuRef}
                                     />
                                 </div>
@@ -475,6 +494,8 @@ function FolderItem({
     onSelect,
     openFolders,
     onToggleFolder,
+    onSelectFolder,
+    onSelectCollection,
     renamingId,
     onStartRename,
     onCommitRename,
@@ -491,6 +512,8 @@ function FolderItem({
     onSelect: (id: string) => void;
     openFolders: Set<string>;
     onToggleFolder: (id: string) => void;
+    onSelectFolder?: (relPath: string, name: string) => void;
+    onSelectCollection?: (relPath: string, name: string, description: string | null) => void;
     renamingId: string | null;
     onStartRename: (id: string) => void;
     onCommitRename: (newName: string) => void;
@@ -522,16 +545,21 @@ function FolderItem({
                             )}
                             style={{ paddingLeft: `${depth * 14 + 10}px` }}
                         >
-                            <button
-                                onClick={() => onToggleFolder(item.id)}
-                                className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
-                            >
-                                <ChevronRight
-                                    className={cn(
-                                        "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                                        isOpen && "rotate-90"
-                                    )}
-                                />
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onToggleFolder(item.id); }}
+                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground cursor-pointer"
+                                >
+                                    <ChevronRight
+                                        className={cn(
+                                            "size-3.5 transition-transform duration-150",
+                                            isOpen && "rotate-90"
+                                        )}
+                                    />
+                                </button>
+                                <button
+                                    onClick={() => onToggleFolder(item.id)}
+                                    className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
+                                >
                                 {isOpen ? (
                                     <FolderOpen className="size-3.5 shrink-0 text-amber-500/70" />
                                 ) : (
@@ -551,7 +579,7 @@ function FolderItem({
                                         {item.children.length}
                                     </span>
                                 )}
-                            </button>
+                                </button>
                             {!isRenaming && (
                                 <div className="relative">
                                     <button
@@ -569,6 +597,7 @@ function FolderItem({
                                         onClose={() => setMenuOpen(false)}
                                         onRename={() => onStartRename(item.id)}
                                         onDelete={() => onDelete(item.relPath)}
+                                        onOpenDocs={() => onSelectFolder?.(item.relPath, item.name)}
                                         menuRef={menuRef}
                                     />
                                 </div>
@@ -596,6 +625,8 @@ function FolderItem({
                                         onSelect={onSelect}
                                         openFolders={openFolders}
                                         onToggleFolder={onToggleFolder}
+                                        onSelectFolder={onSelectFolder}
+                                        onSelectCollection={onSelectCollection}
                                         renamingId={renamingId}
                                         onStartRename={onStartRename}
                                         onCommitRename={onCommitRename}
@@ -623,6 +654,8 @@ function TreeItem({
     onSelect,
     openFolders,
     onToggleFolder,
+    onSelectFolder,
+    onSelectCollection,
     renamingId,
     onStartRename,
     onCommitRename,
@@ -639,6 +672,8 @@ function TreeItem({
     onSelect: (id: string) => void;
     openFolders: Set<string>;
     onToggleFolder: (id: string) => void;
+    onSelectFolder?: (relPath: string, name: string) => void;
+    onSelectCollection?: (relPath: string, name: string, description: string | null) => void;
     renamingId: string | null;
     onStartRename: (id: string) => void;
     onCommitRename: (newName: string) => void;
@@ -658,6 +693,8 @@ function TreeItem({
                 onSelect={onSelect}
                 openFolders={openFolders}
                 onToggleFolder={onToggleFolder}
+                onSelectFolder={onSelectFolder}
+                onSelectCollection={onSelectCollection}
                 renamingId={renamingId}
                 onStartRename={onStartRename}
                 onCommitRename={onCommitRename}
@@ -678,6 +715,7 @@ function TreeItem({
             onSelect={onSelect}
             openFolders={openFolders}
             onToggleFolder={onToggleFolder}
+            onSelectCollection={onSelectCollection}
             renamingId={renamingId}
             onStartRename={onStartRename}
             onCommitRename={onCommitRename}
@@ -748,6 +786,8 @@ interface CollectionPanelProps {
     collections: CollectionTreeItem[];
     selectedRequestId: string | null;
     onSelectRequest: (id: string) => void;
+    onSelectFolder?: (relPath: string, name: string) => void;
+    onSelectCollection?: (relPath: string, name: string, description: string | null) => void;
     onCreateFolder: (parentRelPath: string, name: string) => void;
     onCreateCollection: (parentRelPath: string, name: string) => void;
     onRenameFolder: (relPath: string, newName: string) => void;
@@ -764,6 +804,8 @@ export function CollectionPanel({
     collections,
     selectedRequestId,
     onSelectRequest,
+    onSelectFolder,
+    onSelectCollection,
     onCreateFolder,
     onCreateCollection,
     onRenameFolder,
@@ -988,6 +1030,8 @@ export function CollectionPanel({
                                     onSelect={onSelectRequest}
                                     openFolders={effectiveOpenFolders}
                                     onToggleFolder={toggleFolder}
+                                    onSelectFolder={onSelectFolder}
+                                    onSelectCollection={onSelectCollection}
                                     renamingId={renamingId}
                                     onStartRename={setRenamingId}
                                     onCommitRename={handleCommitRename}

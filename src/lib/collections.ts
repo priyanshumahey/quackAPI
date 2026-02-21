@@ -21,6 +21,7 @@ export interface CollectionEntry {
     name: string;
     fileName: string;
     relPath: string;
+    description: string | null;
     requests: CollectionRequestSummary[];
 }
 
@@ -125,4 +126,27 @@ export async function deleteRequest(
     requestId: string,
 ): Promise<void> {
     return invoke("delete_request", { workspacePath, collectionRelPath, requestId });
+}
+
+export async function updateCollectionDescription(
+    workspacePath: string,
+    collectionRelPath: string,
+    description: string | null,
+): Promise<void> {
+    return invoke("update_collection_description", { workspacePath, collectionRelPath, description });
+}
+
+export async function readFolderReadme(
+    workspacePath: string,
+    folderRelPath: string,
+): Promise<string | null> {
+    return invoke<string | null>("read_folder_readme", { workspacePath, folderRelPath });
+}
+
+export async function writeFolderReadme(
+    workspacePath: string,
+    folderRelPath: string,
+    content: string,
+): Promise<void> {
+    return invoke("write_folder_readme", { workspacePath, folderRelPath, content });
 }

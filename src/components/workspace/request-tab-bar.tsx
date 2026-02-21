@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { HttpMethod } from "@/lib/types";
-import { Globe, Plus, X } from "lucide-react";
+import { BookOpen, Globe, Plus, X } from "lucide-react";
 
 const METHOD_COLORS: Record<string, string> = {
   GET: "text-emerald-600",
@@ -29,7 +29,23 @@ export interface EnvironmentTabItem {
   isDirty?: boolean;
 }
 
-export type TabItem = RequestTabItem | EnvironmentTabItem;
+export interface FolderReadmeTabItem {
+  id: string;
+  kind: "folder-readme";
+  name: string;
+  folderRelPath: string;
+  isDirty?: boolean;
+}
+
+export interface CollectionDocTabItem {
+  id: string;
+  kind: "collection-doc";
+  name: string;
+  collectionRelPath: string;
+  isDirty?: boolean;
+}
+
+export type TabItem = RequestTabItem | EnvironmentTabItem | FolderReadmeTabItem | CollectionDocTabItem;
 
 interface RequestTabBarProps {
   tabs: TabItem[];
@@ -70,8 +86,12 @@ export function RequestTabBar({
               <span className={cn("text-[10px] font-bold uppercase tracking-wide", METHOD_COLORS[tab.method])}>
                 {tab.method}
               </span>
-            ) : (
+            ) : tab.kind === "environment" ? (
               <Globe className="size-3.5 shrink-0 text-violet-500" />
+            ) : tab.kind === "folder-readme" ? (
+              <BookOpen className="size-3.5 shrink-0 text-amber-500" />
+            ) : (
+              <BookOpen className="size-3.5 shrink-0 text-sky-500" />
             )}
             <span className="truncate max-w-[140px]">{tab.name}</span>
             {tab.isDirty && (
