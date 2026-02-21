@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ResizablePanel } from "@/components/ui/resizable-panel";
 import { useWorkspace } from "@/context";
 import { Loader2, Plus } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityBar, type ActivityTab } from "./activity-bar";
 import { CollectionPanel } from "./collection-panel";
 import { EnvironmentEditor } from "./environment-editor";
@@ -124,6 +124,17 @@ function WorkspaceContent() {
   const handleNewTab = useCallback(() => {
     /* Stub: in the future this would open a blank new request */
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+        e.preventDefault();
+        if (activeTabId) handleCloseTab(activeTabId);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTabId, handleCloseTab]);
 
   const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
