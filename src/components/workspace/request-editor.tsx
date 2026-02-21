@@ -1,9 +1,10 @@
 "use client";
 
 import type { HttpMethod } from "@/lib/types";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Send } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, ChevronUp, Send } from "lucide-react";
+import { useState, useCallback, useRef } from "react";
 
 const METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -114,6 +115,61 @@ export function RequestEditor({ requestName }: RequestEditorProps) {
     const [activeRequestTab, setActiveRequestTab] = useState<RequestTab>("params");
     const [activeResponseTab, setActiveResponseTab] = useState<ResponseTab>("pretty");
     const [showMethodDropdown, setShowMethodDropdown] = useState(false);
+
+    const HEADER_HEIGHT = 36;
+    const MIN_HEIGHT = 120;
+    const DEFAULT_HEIGHT = 280;
+    const [responseHeight, setResponseHeight] = useState(DEFAULT_HEIGHT);
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const isResizing = useRef(false);
+    const lastExpandedHeight = useRef(DEFAULT_HEIGHT);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const toggleCollapse = useCallback(() => {
+      setIsCollapsed((prev) => {
+        if (!prev) {
+          lastExpandedHeight.current = responseHeight;
+        } else {
+          setResponseHeight(lastExpandedHeight.current);
+        }
+        return !prev;
+      });
+    }, [responseHeight]);
+
+    const startVerticalResize = useCallback(
+      (e: React.MouseEvent) => {
+        if (isCollapsed) return;
+        e.preventDefault();
+        isResizing.current = true;
+        const startY = e.clientY;
+        const containerHeight = containerRef.current?.parentElement?.getBoundingClientRect().height ?? 600;
+
+        const panelEl = e.currentTarget.parentElement;
+        const startH = panelEl ? panelEl.getBoundingClientRect().height : responseHeight;
+
+        const onMouseMove = (ev: MouseEvent) => {
+          if (!isResizing.current) return;
+          const delta = startY - ev.clientY;
+          const maxH = containerHeight - 80;
+          const newH = Math.min(maxH, Math.max(MIN_HEIGHT, startH + delta));
+          setResponseHeight(newH);
+        };
+
+        const onMouseUp = () => {
+          isResizing.current = false;
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+        };
+
+        document.body.style.cursor = "row-resize";
+        document.body.style.userSelect = "none";
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+      },
+      [isCollapsed, responseHeight]
+    );
 
     const mockKVRows: KVRow[] = [
         { key: "", value: "", description: "" },
@@ -268,13 +324,39 @@ export function RequestEditor({ requestName }: RequestEditorProps) {
                     )}
                 </div>
 
-                <div className="flex flex-col border-t border-border" style={{ minHeight: "40%" }}>
-                    <div className="flex items-center justify-between border-b border-border px-4 py-1.5">
-                        <div className="flex items-center gap-0">
-                            {RESPONSE_TABS.map((tab) => (
+                <div
+                    ref={containerRef}
+                    className={cn(
+                      "relative flex flex-col border-t border-border shrink-0 overflow-hidden",
+                      !isResizing.current && "transition-[height] duration-200 ease-out"
+                    )}
+                    style={{ height: isCollapsed ? HEADER_HEIGHT : responseHeight, minHeight: HEADER_HEIGHT }}
+                >
+                    {!isCollapsed && (
+                      <div
+                        onMouseDown={startVerticalResize}
+                        className="absolute -top-[2px] left-0 right-0 z-10 h-[5px] cursor-row-resize
+                          transition-colors duration-150 hover:bg-primary/20 active:bg-primary/40"
+                      />
+                    )}
+                    <div
+                        className="flex shrink-0 items-center justify-between border-b border-border px-4 cursor-pointer hover:bg-muted/30 transition-colors duration-150"
+                        style={{ height: HEADER_HEIGHT }}
+                        onClick={toggleCollapse}
+                    >
+                        <div className="flex items-center gap-1">
+                            {isCollapsed ? (
+                              <ChevronUp className="size-3.5 text-muted-foreground/50 mr-1" />
+                            ) : (
+                              <ChevronDown className="size-3.5 text-muted-foreground/50 mr-1" />
+                            )}
+                            {!isCollapsed && RESPONSE_TABS.map((tab) => (
                                 <button
                                     key={tab.id}
-                                    onClick={() => setActiveResponseTab(tab.id)}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveResponseTab(tab.id);
+                                    }}
                                     className={cn(
                                         "px-3 py-1.5 text-[13px] cursor-pointer transition-colors duration-150",
                                         activeResponseTab === tab.id
@@ -285,6 +367,9 @@ export function RequestEditor({ requestName }: RequestEditorProps) {
                                     {tab.label}
                                 </button>
                             ))}
+                            {isCollapsed && (
+                                <span className="text-[13px] font-medium text-muted-foreground/60">Response</span>
+                            )}
                         </div>
                         <div className="flex items-center gap-3 text-[12px]">
                             <span className="font-medium text-emerald-600">200 OK</span>
@@ -293,11 +378,13 @@ export function RequestEditor({ requestName }: RequestEditorProps) {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-auto bg-muted/20">
-                        <pre className="p-4 text-[13px] leading-relaxed font-mono text-foreground/80">
-                            {MOCK_RESPONSE}
-                        </pre>
-                    </div>
+                    {!isCollapsed && (
+                      <ScrollArea className="min-h-0 flex-1 bg-muted/20">
+                          <pre className="p-4 text-[13px] leading-relaxed font-mono text-foreground/80">
+                              {MOCK_RESPONSE}
+                          </pre>
+                      </ScrollArea>
+                    )}
                 </div>
             </div>
         </div>
