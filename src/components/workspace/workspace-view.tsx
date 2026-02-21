@@ -146,7 +146,13 @@ function WorkspaceContent() {
 
   return (
     <div className="flex h-full flex-1 overflow-hidden">
-      <ActivityBar activeTab={activeActivity} onTabChange={setActiveActivity} />
+      <ActivityBar
+        activeTab={activeActivity}
+        onTabChange={setActiveActivity}
+        onRefresh={() => {
+          console.log("Resync triggered");
+        }}
+      />
 
       <ResizablePanel defaultWidth={260} minWidth={180} maxWidth={420}>
         {activeActivity === "collections" && (

@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Blocks, Server, History } from "lucide-react";
+import { Blocks, Server, History, RefreshCw } from "lucide-react";
 
 export type ActivityTab = "collections" | "environments" | "history";
 
@@ -14,9 +14,10 @@ const TABS: { id: ActivityTab; label: string; icon: React.ReactNode }[] = [
 interface ActivityBarProps {
   activeTab: ActivityTab;
   onTabChange: (tab: ActivityTab) => void;
+  onRefresh?: () => void;
 }
 
-export function ActivityBar({ activeTab, onTabChange }: ActivityBarProps) {
+export function ActivityBar({ activeTab, onTabChange, onRefresh }: ActivityBarProps) {
   return (
     <div className="flex h-full w-11 shrink-0 flex-col items-center border-r border-border bg-sidebar pt-3 gap-1 select-none">
       {TABS.map((tab) => (
@@ -35,6 +36,20 @@ export function ActivityBar({ activeTab, onTabChange }: ActivityBarProps) {
           {tab.icon}
         </button>
       ))}
+
+      <div className="flex-1" />
+
+      <button
+        onClick={onRefresh}
+        title="Resync collections & environments"
+        className={cn(
+          "mb-3 flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground/70",
+          "transition-all duration-150 cursor-pointer",
+          "hover:bg-muted/60 hover:text-foreground active:rotate-180"
+        )}
+      >
+        <RefreshCw className="size-[16px]" />
+      </button>
     </div>
   );
 }
