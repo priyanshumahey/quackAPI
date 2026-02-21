@@ -5,14 +5,18 @@ import { ResizablePanel } from "@/components/ui/resizable-panel";
 import { useWorkspace } from "@/context";
 import {
   addEnvVariable,
+  createEnvFile,
+  deleteEnvFile,
+  deleteEnvVariable,
   listEnvironments,
+  renameEnvFile,
   toggleEnvFile,
   toggleEnvVariable,
   updateEnvVariable,
   type EnvFile
 } from "@/lib/environments";
 import { Loader2, Plus } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityBar, type ActivityTab } from "./activity-bar";
 import { CollectionPanel } from "./collection-panel";
 import { EnvironmentEditor } from "./environment-editor";
@@ -135,17 +139,17 @@ function WorkspaceContent() {
   );
 
   const handleToggleVariable = useCallback(
-    async (envName: string, key: string, enabled: boolean) => {
+    async (envName: string, index: number, enabled: boolean) => {
       if (!folderPath) return;
       try {
-        await toggleEnvVariable(folderPath, envName, key, enabled);
+        await toggleEnvVariable(folderPath, envName, index, enabled);
         setEnvironments((prev) =>
           prev.map((e) => {
             if (e.name !== envName) return e;
             return {
               ...e,
               variables: e.variables.map((v) =>
-                v.key === key ? { ...v, enabled } : v
+                v.index === index ? { ...v, enabled } : v
               ),
             };
           })
@@ -173,10 +177,10 @@ function WorkspaceContent() {
   );
 
   const handleUpdateVariable = useCallback(
-    async (envName: string, oldKey: string, newKey: string, newValue: string) => {
+    async (envName: string, index: number, newKey: string, newValue: string) => {
       if (!folderPath) return;
       try {
-        const updated = await updateEnvVariable(folderPath, envName, oldKey, newKey, newValue);
+        const updated = await updateEnvVariable(folderPath, envName, index, newKey, newValue);
         setEnvironments((prev) =>
           prev.map((e) => (e.name === envName ? { ...e, variables: updated } : e))
         );
@@ -185,6 +189,76 @@ function WorkspaceContent() {
       }
     },
     [folderPath]
+  );
+
+  const handleDeleteVariable = useCallback(
+    async (envName: string, index: number) => {
+      if (!folderPath) return;
+      try {
+        const updated = await deleteEnvVariable(folderPath, envName, index);
+        setEnvironments((prev) =>
+          prev.map((e) => (e.name === envName ? { ...e, variables: updated } : e))
+        );
+      } catch (err) {
+        console.error("Failed to delete variable", err);
+      }
+    },
+    [folderPath]
+  );
+
+  const handleCreateEnv = useCallback(
+    async (name: string) => {
+      if (!folderPath) return;
+      try {
+        await createEnvFile(folderPath, name);
+        await loadEnvs();
+      } catch (err) {
+        console.error("Failed to create env file", err);
+      }
+    },
+    [folderPath, loadEnvs]
+  );
+
+  const handleRenameEnv = useCallback(
+    async (oldName: string, newName: string) => {
+      if (!folderPath) return;
+      try {
+        await renameEnvFile(folderPath, oldName, newName);
+        const oldTabId = `env-tab-${oldName}`;
+        const newTabId = `env-tab-${newName}`;
+        setOpenTabs((prev) =>
+          prev.map((t) =>
+            t.id === oldTabId ? { ...t, id: newTabId, name: newName } : t
+          )
+        );
+        if (activeTabId === oldTabId) setActiveTabId(newTabId);
+        await loadEnvs();
+      } catch (err) {
+        console.error("Failed to rename env file", err);
+      }
+    },
+    [folderPath, loadEnvs, activeTabId]
+  );
+
+  const handleDeleteEnv = useCallback(
+    async (envName: string) => {
+      if (!folderPath) return;
+      try {
+        await deleteEnvFile(folderPath, envName);
+        const tabId = `env-tab-${envName}`;
+        setOpenTabs((prev) => {
+          const next = prev.filter((t) => t.id !== tabId);
+          if (activeTabId === tabId) {
+            setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
+          }
+          return next;
+        });
+        await loadEnvs();
+      } catch (err) {
+        console.error("Failed to delete env file", err);
+      }
+    },
+    [folderPath, loadEnvs, activeTabId]
   );
 
   const handleCloseTab = useCallback(
@@ -229,6 +303,22 @@ function WorkspaceContent() {
   const activeEnvironment =
     activeEnvName ? environments.find((e) => e.name === activeEnvName) ?? null : null;
 
+  const conflictingKeys = useMemo(() => {
+    const keyCounts = new Map<string, number>();
+    for (const env of environments) {
+      if (!env.isEnabled) continue;
+      for (const v of env.variables) {
+        if (!v.enabled) continue;
+        keyCounts.set(v.key, (keyCounts.get(v.key) ?? 0) + 1);
+      }
+    }
+    const conflicts = new Set<string>();
+    for (const [key, count] of keyCounts) {
+      if (count > 1) conflicts.add(key);
+    }
+    return conflicts;
+  }, [environments]);
+
   return (
     <div className="flex h-full flex-1 overflow-hidden">
       <ActivityBar
@@ -252,6 +342,9 @@ function WorkspaceContent() {
             activeEnvName={activeEnvName}
             onSelectEnv={handleSelectEnv}
             onToggleEnv={handleToggleEnv}
+            onCreateEnv={handleCreateEnv}
+            onRenameEnv={handleRenameEnv}
+            onDeleteEnv={handleDeleteEnv}
           />
         )}
         {activeActivity === "history" && (
@@ -281,14 +374,18 @@ function WorkspaceContent() {
           {activeTab?.kind === "environment" && activeEnvironment ? (
             <EnvironmentEditor
               environment={activeEnvironment}
-              onToggleVariable={(key, enabled) =>
-                handleToggleVariable(activeEnvironment.name, key, enabled)
+              conflictingKeys={conflictingKeys}
+              onToggleVariable={(index, enabled) =>
+                handleToggleVariable(activeEnvironment.name, index, enabled)
               }
               onAddVariable={(key, value) =>
                 handleAddVariable(activeEnvironment.name, key, value)
               }
-              onUpdateVariable={(oldKey, newKey, newValue) =>
-                handleUpdateVariable(activeEnvironment.name, oldKey, newKey, newValue)
+              onUpdateVariable={(index, newKey, newValue) =>
+                handleUpdateVariable(activeEnvironment.name, index, newKey, newValue)
+              }
+              onDeleteVariable={(index) =>
+                handleDeleteVariable(activeEnvironment.name, index)
               }
             />
           ) : (

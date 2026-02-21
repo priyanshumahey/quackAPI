@@ -1,4 +1,5 @@
 export interface EnvVariable {
+    index: number;
     key: string;
     value: string;
     enabled: boolean;
@@ -31,10 +32,10 @@ export async function toggleEnvFile(
 export async function toggleEnvVariable(
     workspacePath: string,
     envName: string,
-    key: string,
+    index: number,
     enabled: boolean,
 ): Promise<void> {
-    return invoke("toggle_env_variable", { workspacePath, envName, key, enabled });
+    return invoke("toggle_env_variable", { workspacePath, envName, index, enabled });
 }
 
 export async function addEnvVariable(
@@ -49,14 +50,14 @@ export async function addEnvVariable(
 export async function updateEnvVariable(
     workspacePath: string,
     envName: string,
-    oldKey: string,
+    index: number,
     newKey: string,
     newValue: string,
 ): Promise<EnvVariable[]> {
     return invoke<EnvVariable[]>("update_env_variable", {
         workspacePath,
         envName,
-        oldKey,
+        index,
         newKey,
         newValue,
     });
@@ -65,7 +66,29 @@ export async function updateEnvVariable(
 export async function deleteEnvVariable(
     workspacePath: string,
     envName: string,
-    key: string,
+    index: number,
 ): Promise<EnvVariable[]> {
-    return invoke<EnvVariable[]>("delete_env_variable", { workspacePath, envName, key });
+    return invoke<EnvVariable[]>("delete_env_variable", { workspacePath, envName, index });
+}
+
+export async function createEnvFile(
+    workspacePath: string,
+    envName: string,
+): Promise<void> {
+    return invoke("create_env_file", { workspacePath, envName });
+}
+
+export async function renameEnvFile(
+    workspacePath: string,
+    oldName: string,
+    newName: string,
+): Promise<void> {
+    return invoke("rename_env_file", { workspacePath, oldName, newName });
+}
+
+export async function deleteEnvFile(
+    workspacePath: string,
+    envName: string,
+): Promise<void> {
+    return invoke("delete_env_file", { workspacePath, envName });
 }
