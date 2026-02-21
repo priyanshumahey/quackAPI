@@ -99,6 +99,7 @@ pub fn run() {
             commands::update_request,
             commands::read_folder_readme,
             commands::write_folder_readme,
+            commands::send_http_request,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
