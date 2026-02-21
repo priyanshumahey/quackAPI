@@ -1,8 +1,41 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { ResizablePanel } from "@/components/ui/resizable-panel";
 import { useWorkspace } from "@/context";
-import { FolderOpen, Home, Plus, Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
+import { useCallback, useState } from "react";
+import { ActivityBar, type ActivityTab } from "./activity-bar";
+import { CollectionPanel } from "./collection-panel";
+import { EnvironmentEditor } from "./environment-editor";
+import { EnvironmentPanel } from "./environment-panel";
+import {
+  MOCK_COLLECTIONS,
+  MOCK_ENVIRONMENTS,
+  type MockFolder,
+  type MockRequest,
+} from "./mock-data";
+import { RequestEditor } from "./request-editor";
+import {
+  RequestTabBar,
+  type EnvironmentTabItem,
+  type RequestTabItem,
+  type TabItem,
+} from "./request-tab-bar";
+
+function findRequestInTree(
+  items: (MockFolder | MockRequest)[],
+  id: string
+): MockRequest | null {
+  for (const item of items) {
+    if (item.type === "request" && item.id === id) return item;
+    if (item.type === "folder") {
+      const found = findRequestInTree(item.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 function InitPrompt() {
   const { initWorkspace } = useWorkspace();
@@ -21,74 +54,155 @@ function InitPrompt() {
 }
 
 function WorkspaceContent() {
-  const { quack } = useWorkspace();
+  const [activeActivity, setActiveActivity] = useState<ActivityTab>("collections");
+  const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [enabledEnvIds, setEnabledEnvIds] = useState<Set<string>>(
+    () => new Set(MOCK_ENVIRONMENTS.filter((e) => e.isActive).map((e) => e.id))
+  );
+
+  const handleSelectRequest = useCallback(
+    (id: string) => {
+      if (!openTabs.some((t) => t.id === id)) {
+        const req = findRequestInTree(MOCK_COLLECTIONS, id);
+        if (req) {
+          const newTab: RequestTabItem = {
+            id: req.id,
+            kind: "request",
+            name: req.name,
+            method: req.method,
+          };
+          setOpenTabs((prev) => [...prev, newTab]);
+        }
+      }
+      setActiveTabId(id);
+    },
+    [openTabs]
+  );
+
+  const handleSelectEnv = useCallback(
+    (id: string) => {
+      const tabId = `env-tab-${id}`;
+      if (!openTabs.some((t) => t.id === tabId)) {
+        const env = MOCK_ENVIRONMENTS.find((e) => e.id === id);
+        if (env) {
+          const newTab: EnvironmentTabItem = {
+            id: tabId,
+            kind: "environment",
+            name: env.name,
+          };
+          setOpenTabs((prev) => [...prev, newTab]);
+        }
+      }
+      setActiveTabId(tabId);
+    },
+    [openTabs]
+  );
+
+  const handleToggleEnv = useCallback((id: string) => {
+    setEnabledEnvIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleCloseTab = useCallback(
+    (id: string) => {
+      setOpenTabs((prev) => {
+        const next = prev.filter((t) => t.id !== id);
+        if (activeTabId === id) {
+          setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
+        }
+        return next;
+      });
+    },
+    [activeTabId]
+  );
+
+  const handleNewTab = useCallback(() => {
+    /* Stub: in the future this would open a blank new request */
+  }, []);
+
+  const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
+
+  const activeRequest =
+    activeTab?.kind === "request"
+      ? findRequestInTree(MOCK_COLLECTIONS, activeTab.id)
+      : null;
+
+  const activeEnvironment =
+    activeTab?.kind === "environment"
+      ? MOCK_ENVIRONMENTS.find(
+        (e) => `env-tab-${e.id}` === activeTab.id
+      ) ?? null
+      : null;
+
+  const selectedEnvIdForPanel =
+    activeTab?.kind === "environment"
+      ? activeTab.id.replace("env-tab-", "")
+      : null;
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
-      <section>
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Collections
-        </h2>
-        {quack.collections.length === 0 ? (
-          <p className="text-sm text-muted-foreground italic">No collections</p>
-        ) : (
-          <ul className="space-y-1">
-            {quack.collections.map((c) => (
-              <li
-                key={c.id}
-                className="rounded border border-border px-3 py-2 text-sm"
-              >
-                {c.name}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {c.requests.length} request{c.requests.length !== 1 && "s"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+    <div className="flex h-full flex-1 overflow-hidden">
+      <ActivityBar activeTab={activeActivity} onTabChange={setActiveActivity} />
 
-      <section>
-        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Environments
-        </h2>
-        {Object.keys(quack.environments).length === 0 ? (
-          <p className="text-sm text-muted-foreground italic">No environments</p>
-        ) : (
-          <ul className="space-y-1">
-            {Object.entries(quack.environments).map(([name, vars]) => (
-              <li
-                key={name}
-                className="rounded border border-border px-3 py-2 text-sm"
-              >
-                {name}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {vars.length} variable{vars.length !== 1 && "s"}
-                </span>
-              </li>
-            ))}
-          </ul>
+      <ResizablePanel defaultWidth={260} minWidth={180} maxWidth={420}>
+        {activeActivity === "collections" && (
+          <CollectionPanel
+            selectedRequestId={activeTab?.kind === "request" ? activeTabId : null}
+            onSelectRequest={handleSelectRequest}
+          />
         )}
-      </section>
+        {activeActivity === "environments" && (
+          <EnvironmentPanel
+            activeEnvId={selectedEnvIdForPanel}
+            onSelectEnv={handleSelectEnv}
+            enabledEnvIds={enabledEnvIds}
+            onToggleEnv={handleToggleEnv}
+          />
+        )}
+        {activeActivity === "history" && (
+          <div className="flex h-full flex-col border-r border-border bg-sidebar select-none">
+            <div className="flex items-center border-b border-border px-3 py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+                History
+              </span>
+            </div>
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-[13px] text-muted-foreground/50 italic">No history yet</p>
+            </div>
+          </div>
+        )}
+      </ResizablePanel>
+
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <RequestTabBar
+          tabs={openTabs}
+          activeTabId={activeTabId}
+          onSelectTab={setActiveTabId}
+          onCloseTab={handleCloseTab}
+          onNewTab={handleNewTab}
+        />
+
+        <div className="flex-1 overflow-hidden">
+          {activeTab?.kind === "environment" ? (
+            <EnvironmentEditor environment={activeEnvironment} />
+          ) : (
+            <RequestEditor requestName={activeRequest?.name ?? null} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 export function WorkspaceView() {
-  const { folderName, goHome, closeFolder, quack, isLoading } = useWorkspace();
+  const { quack, isLoading } = useWorkspace();
 
   return (
-    <div className="flex min-h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon-sm" onClick={goHome} title="Global Scope">
-            <Home className="size-4" />
-          </Button>
-          <FolderOpen className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">{folderName}</span>
-        </div>
-      </header>
-
+    <div className="flex h-full flex-col">
       {isLoading ? (
         <div className="flex flex-1 items-center justify-center">
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
