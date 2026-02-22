@@ -1,4 +1,5 @@
 mod commands;
+pub mod core;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -102,6 +103,9 @@ pub fn run() {
             commands::write_folder_readme,
             commands::send_http_request,
             commands::cancel_http_request,
+            commands::install_cli,
+            commands::uninstall_cli,
+            commands::check_cli_installed,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -112,6 +116,11 @@ pub fn run() {
 
                 let app_menu = SubmenuBuilder::new(app, "Quack API")
                     .about(None)
+                    .separator()
+                    .item(
+                        &MenuItemBuilder::with_id("install_cli", "Install Command Line Tool...")
+                            .build(app)?,
+                    )
                     .separator()
                     .services()
                     .separator()
@@ -182,6 +191,11 @@ pub fn run() {
                         "close_folder" => {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.emit("menu-close-folder", ());
+                            }
+                        }
+                        "install_cli" => {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.emit("menu-install-cli", ());
                             }
                         }
                         _ => {}

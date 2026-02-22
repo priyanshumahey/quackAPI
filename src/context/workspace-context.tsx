@@ -349,6 +349,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let unlistenOpen: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
+    let unlistenCli: (() => void) | undefined;
 
     const setup = async () => {
       try {
@@ -359,6 +360,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         unlistenClose = await listen("menu-close-folder", () => {
           closeFolder();
         });
+        unlistenCli = await listen("menu-install-cli", async () => {
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            const result = await invoke<string>("install_cli");
+            alert(result);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown error";
+            alert(`Failed to install CLI:\n${msg}`);
+          }
+        });
       } catch { }
     };
 
@@ -367,6 +378,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       unlistenOpen?.();
       unlistenClose?.();
+      unlistenCli?.();
     };
   }, [getTauriApis, openFolder, closeFolder]);
 

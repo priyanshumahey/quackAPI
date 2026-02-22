@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.quack-api.app",
   "build": {
-    "beforeDevCommand": "bun dev:next",
+    "beforeDevCommand": "bun run ensure:cli-sidecar && bun dev:next",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "bun build:next",
+    "beforeBuildCommand": "bun build:next && bun run build:cli-bundle",
     "frontendDist": "../dist"
   },
   "app": {
@@ -27,6 +27,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/quack"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
