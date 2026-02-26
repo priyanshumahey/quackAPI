@@ -32,6 +32,9 @@ tauri-plugin-store = "2"
 tauri-plugin-dialog = "2.6.0"
 uuid = { version = "1.21.0", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["default-tls", "charset", "gzip", "brotli", "deflate", "cookies", "stream", "socks"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+url = "2"
 base64 = "0.22.1"
 regex = "1"
 tokio = { version = "1.49.0", features = ["sync", "rt-multi-thread", "macros"] }
