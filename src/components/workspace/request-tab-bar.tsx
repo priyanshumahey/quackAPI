@@ -13,6 +13,7 @@ const METHOD_COLORS: Record<string, string> = {
   DELETE: "text-red-600",
   HEAD: "text-muted-foreground",
   OPTIONS: "text-muted-foreground",
+  WS: "text-purple-600",
 };
 
 export interface RequestTabItem {

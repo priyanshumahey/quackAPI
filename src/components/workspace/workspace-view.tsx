@@ -39,6 +39,7 @@ import { EnvironmentEditor } from "./environment-editor";
 import { EnvironmentPanel } from "./environment-panel";
 import { FolderReadmeView } from "./folder-readme-view";
 import { RequestEditor } from "./request-editor";
+import { WebSocketEditor } from "./websocket-editor";
 import {
   RequestTabBar,
   type CollectionDocTabItem,
@@ -313,6 +314,39 @@ function WorkspaceContent() {
         setActiveTabId(newId);
       } catch (err) {
         console.error("Failed to add request", err);
+      }
+    },
+    [folderPath, loadCollections, openTabs]
+  );
+
+  const handleAddWebSocket = useCallback(
+    async (collectionRelPath: string) => {
+      if (!folderPath) return;
+      if (!collectionRelPath) {
+        console.error("handleAddWebSocket called without a collectionRelPath");
+        return;
+      }
+      try {
+        const newId = await addRequestToCollection(
+          folderPath,
+          collectionRelPath,
+          "New WebSocket",
+          "WS"
+        );
+        await loadCollections();
+        if (!openTabs.some((t) => t.id === newId)) {
+          const newTab: RequestTabItem = {
+            id: newId,
+            kind: "request",
+            name: "New WebSocket",
+            method: "WS",
+            collectionRelPath,
+          };
+          setOpenTabs((prev) => [...prev, newTab]);
+        }
+        setActiveTabId(newId);
+      } catch (err) {
+        console.error("Failed to add websocket request", err);
       }
     },
     [folderPath, loadCollections, openTabs]
@@ -599,6 +633,7 @@ function WorkspaceContent() {
             onMoveItem={handleMoveCollectionItem}
             onMoveRequest={handleMoveRequest}
             onAddRequest={handleAddRequest}
+            onAddWebSocket={handleAddWebSocket}
           />
         )}
         {activeActivity === "environments" && (
@@ -701,6 +736,15 @@ function WorkspaceContent() {
                   return update(prev);
                 });
               }}
+            />
+          ) : activeRequest?.method === "WS" ? (
+            <WebSocketEditor
+              key={activeRequest.id}
+              connectionId={activeRequest.id}
+              collectionRelPath={activeRequest.collectionFile}
+              workspacePath={folderPath}
+              environments={environments}
+              onOpenEnvTab={handleSelectEnv}
             />
           ) : (
             <RequestEditor

@@ -31,6 +31,7 @@ import {
     MoreHorizontal,
     Pencil,
     Plus,
+    PlugZap,
     Search,
     SendHorizontal,
     Trash2,
@@ -45,6 +46,7 @@ const METHOD_COLORS: Record<string, string> = {
     DELETE: "text-red-600",
     HEAD: "text-muted-foreground",
     OPTIONS: "text-muted-foreground",
+    WS: "text-purple-600",
 };
 
 // ── DnD data carried on drag items ─────────────────────
@@ -69,6 +71,7 @@ function ItemContextMenu({
     onRename,
     onDelete,
     onAddRequest,
+    onAddWebSocket,
     onOpenDocs,
     menuRef,
 }: {
@@ -77,6 +80,7 @@ function ItemContextMenu({
     onRename: () => void;
     onDelete: () => void;
     onAddRequest?: () => void;
+    onAddWebSocket?: () => void;
     onOpenDocs?: () => void;
     menuRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -103,6 +107,14 @@ function ItemContextMenu({
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
                 >
                     <SendHorizontal className="size-3.5" /> New Request
+                </button>
+            )}
+            {onAddWebSocket && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onClose(); onAddWebSocket(); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-purple-600 hover:bg-accent hover:text-purple-700 transition-colors duration-150 cursor-pointer"
+                >
+                    <PlugZap className="size-3.5" /> New WebSocket
                 </button>
             )}
             {onOpenDocs && (
@@ -367,6 +379,7 @@ function CollectionItem({
     onCancelRename,
     onDelete,
     onAddRequest,
+    onAddWebSocket,
 }: {
     item: CollectionEntry;
     depth: number;
@@ -381,6 +394,7 @@ function CollectionItem({
     onCancelRename: () => void;
     onDelete: (id: string, collectionRelPath?: string) => void;
     onAddRequest: (collectionRelPath: string) => void;
+    onAddWebSocket?: (collectionRelPath: string) => void;
 }) {
     const isOpen = openFolders.has(item.id);
     const isRenaming = renamingId === item.id;
@@ -456,6 +470,7 @@ function CollectionItem({
                                         onRename={() => onStartRename(item.id)}
                                         onDelete={() => onDelete(item.relPath)}
                                         onAddRequest={() => onAddRequest(item.relPath)}
+                                        onAddWebSocket={onAddWebSocket ? () => onAddWebSocket(item.relPath) : undefined}
                                         onOpenDocs={() => onSelectCollection?.(item.relPath, item.name, item.description)}
                                         menuRef={menuRef}
                                     />
@@ -502,6 +517,7 @@ function FolderItem({
     onCancelRename,
     onDelete,
     onAddRequest,
+    onAddWebSocket,
     creating,
     onCreateCommit,
     onCreateCancel,
@@ -520,6 +536,7 @@ function FolderItem({
     onCancelRename: () => void;
     onDelete: (id: string, collectionRelPath?: string) => void;
     onAddRequest: (collectionRelPath: string) => void;
+    onAddWebSocket?: (collectionRelPath: string) => void;
     creating: { parentId: string; kind: "folder" | "collection" } | null;
     onCreateCommit: (name: string) => void;
     onCreateCancel: () => void;
@@ -633,6 +650,7 @@ function FolderItem({
                                         onCancelRename={onCancelRename}
                                         onDelete={onDelete}
                                         onAddRequest={onAddRequest}
+                                        onAddWebSocket={onAddWebSocket}
                                         creating={creating}
                                         onCreateCommit={onCreateCommit}
                                         onCreateCancel={onCreateCancel}
@@ -662,6 +680,7 @@ function TreeItem({
     onCancelRename,
     onDelete,
     onAddRequest,
+    onAddWebSocket,
     creating,
     onCreateCommit,
     onCreateCancel,
@@ -680,6 +699,7 @@ function TreeItem({
     onCancelRename: () => void;
     onDelete: (id: string, collectionRelPath?: string) => void;
     onAddRequest: (collectionRelPath: string) => void;
+    onAddWebSocket?: (collectionRelPath: string) => void;
     creating: { parentId: string; kind: "folder" | "collection" } | null;
     onCreateCommit: (name: string) => void;
     onCreateCancel: () => void;
@@ -701,6 +721,7 @@ function TreeItem({
                 onCancelRename={onCancelRename}
                 onDelete={onDelete}
                 onAddRequest={onAddRequest}
+                onAddWebSocket={onAddWebSocket}
                 creating={creating}
                 onCreateCommit={onCreateCommit}
                 onCreateCancel={onCreateCancel}
@@ -722,6 +743,7 @@ function TreeItem({
             onCancelRename={onCancelRename}
             onDelete={onDelete}
             onAddRequest={onAddRequest}
+            onAddWebSocket={onAddWebSocket}
         />
     );
 }
@@ -798,6 +820,7 @@ interface CollectionPanelProps {
     onMoveItem: (itemRelPath: string, destParentRelPath: string) => void;
     onMoveRequest: (requestId: string, sourceCollectionRelPath: string, destCollectionRelPath: string) => void;
     onAddRequest: (collectionRelPath: string) => void;
+    onAddWebSocket?: (collectionRelPath: string) => void;
 }
 
 export function CollectionPanel({
@@ -816,6 +839,7 @@ export function CollectionPanel({
     onMoveItem,
     onMoveRequest,
     onAddRequest,
+    onAddWebSocket,
 }: CollectionPanelProps) {
     const [search, setSearch] = useState("");
     const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set<string>());
@@ -1038,6 +1062,7 @@ export function CollectionPanel({
                                     onCancelRename={() => setRenamingId(null)}
                                     onDelete={handleDelete}
                                     onAddRequest={onAddRequest}
+                                    onAddWebSocket={onAddWebSocket}
                                     creating={creating}
                                     onCreateCommit={handleCreateCommit}
                                     onCreateCancel={() => setCreating(null)}

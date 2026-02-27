@@ -15,7 +15,7 @@ export interface QueryParam {
   enabled: boolean;
 }
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" | "WS";
 
 export interface CollectionRequest {
   id: string;

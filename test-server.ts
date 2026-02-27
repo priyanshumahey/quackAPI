@@ -29,14 +29,50 @@ Available endpoints to test in QuackAPI:
 7. Cookies (Test cookie jar persistence)
    URL: http://localhost:3005/cookie/set (Sets a test cookie)
    URL: http://localhost:3005/cookie/get (Reads the test cookie)
+
+8. WebSocket Endpoints
+   ws://localhost:3005/ws/echo          (Echoes messages back)
+   ws://localhost:3005/ws/chat          (Chat room — broadcasts to all)
+   ws://localhost:3005/ws/ticker        (Sends a tick every 2s)
+   ws://localhost:3005/ws/json          (Echoes parsed JSON with metadata)
 ---------------------------------------------------------
 `);
 
+// ── WebSocket state ──────────────────────────────────────────────────────────
+
+const chatClients = new Set<any>();
+const tickerClients = new Set<any>();
+let tickerInterval: ReturnType<typeof setInterval> | null = null;
+
+function startTicker() {
+  if (tickerInterval) return;
+  let count = 0;
+  tickerInterval = setInterval(() => {
+    count++;
+    const msg = JSON.stringify({ tick: count, time: new Date().toISOString() });
+    for (const ws of tickerClients) {
+      ws.send(msg);
+    }
+    if (tickerClients.size === 0) {
+      clearInterval(tickerInterval!);
+      tickerInterval = null;
+    }
+  }, 2000);
+}
+
 Bun.serve({
   port: PORT,
-  async fetch(req) {
+  async fetch(req, server) {
     const url = new URL(req.url);
     const method = req.method;
+
+    // ── WebSocket upgrade ────────────────────────────────
+    if (url.pathname.startsWith("/ws/")) {
+      const channel = url.pathname.split("/")[2] || "echo";
+      const upgraded = server.upgrade(req, { data: { channel } as any });
+      if (upgraded) return undefined as any;
+      return new Response("WebSocket upgrade failed", { status: 500 });
+    }
 
     // CORS headers just in case
     const corsHeaders = {
@@ -185,5 +221,74 @@ Bun.serve({
     return new Response(JSON.stringify(responsePayload, null, 2), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  },
+
+  websocket: {
+    open(ws: any) {
+      const channel: string = ws.data?.channel || "echo";
+      console.log(`  ↔ WS [${channel}] client connected`);
+
+      if (channel === "chat") {
+        chatClients.add(ws);
+        ws.send(JSON.stringify({ type: "system", message: `Welcome! ${chatClients.size} user(s) online.` }));
+        for (const client of chatClients) {
+          if (client !== ws) {
+            client.send(JSON.stringify({ type: "system", message: "A new user joined." }));
+          }
+        }
+      } else if (channel === "ticker") {
+        tickerClients.add(ws);
+        ws.send(JSON.stringify({ type: "system", message: "Subscribed to ticker. You will receive a tick every 2 seconds." }));
+        startTicker();
+      } else if (channel === "json") {
+        ws.send(JSON.stringify({ type: "system", message: "Send any JSON and I will echo it back with metadata." }));
+      } else {
+        // echo
+        ws.send("Connected to echo WebSocket. Send any message and it will be echoed back.");
+      }
+    },
+
+    message(ws: any, message: string | Buffer) {
+      const channel: string = ws.data?.channel || "echo";
+      const text = typeof message === "string" ? message : message.toString();
+      console.log(`  ↔ WS [${channel}] received: ${text.substring(0, 80)}`);
+
+      if (channel === "echo") {
+        ws.send(`echo: ${text}`);
+      } else if (channel === "chat") {
+        const payload = JSON.stringify({ type: "message", from: "user", data: text, timestamp: new Date().toISOString() });
+        for (const client of chatClients) {
+          client.send(payload);
+        }
+      } else if (channel === "ticker") {
+        ws.send(JSON.stringify({ type: "info", message: "This is a read-only ticker stream. Your message was ignored." }));
+      } else if (channel === "json") {
+        try {
+          const parsed = JSON.parse(text);
+          ws.send(JSON.stringify({
+            type: "echo",
+            receivedAt: new Date().toISOString(),
+            byteSize: text.length,
+            data: parsed,
+          }, null, 2));
+        } catch {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid JSON", raw: text }));
+        }
+      }
+    },
+
+    close(ws: any) {
+      const channel: string = ws.data?.channel || "echo";
+      console.log(`  ↔ WS [${channel}] client disconnected`);
+
+      if (channel === "chat") {
+        chatClients.delete(ws);
+        for (const client of chatClients) {
+          client.send(JSON.stringify({ type: "system", message: "A user left." }));
+        }
+      } else if (channel === "ticker") {
+        tickerClients.delete(ws);
+      }
+    },
   },
 });

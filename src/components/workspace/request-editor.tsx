@@ -33,6 +33,7 @@ const METHOD_COLORS: Record<string, string> = {
     DELETE: "text-red-600",
     HEAD: "text-muted-foreground",
     OPTIONS: "text-muted-foreground",
+    WS: "text-purple-600",
 };
 
 const METHOD_BG: Record<string, string> = {
@@ -43,6 +44,7 @@ const METHOD_BG: Record<string, string> = {
     DELETE: "bg-red-600",
     HEAD: "bg-muted-foreground",
     OPTIONS: "bg-muted-foreground",
+    WS: "bg-purple-600",
 };
 
 type RequestTab = "params" | "auth" | "headers" | "body" | "pre-req" | "tests" | "settings";
