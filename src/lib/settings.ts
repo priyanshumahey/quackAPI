@@ -317,6 +317,22 @@ export async function addHistoryEntry(entry: HistoryEntry): Promise<HistoryEntry
     }
 }
 
+export async function deleteHistoryEntry(entryId: string): Promise<HistoryEntry[]> {
+    try {
+        const store = await getStore();
+        if (!store) return [];
+
+        const existing =
+            (await store.get<HistoryEntry[]>(KEYS.REQUEST_HISTORY)) ?? [];
+        const updated = existing.filter((e) => e.id !== entryId);
+        await store.set(KEYS.REQUEST_HISTORY, updated);
+        await store.save();
+        return updated;
+    } catch {
+        return [];
+    }
+}
+
 export async function clearRequestHistory(): Promise<void> {
     try {
         const store = await getStore();

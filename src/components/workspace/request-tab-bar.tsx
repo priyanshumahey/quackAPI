@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { HttpMethod } from "@/lib/types";
+import type { HistoryEntry, HttpMethod } from "@/lib/types";
 import { BookOpen, Globe, Plus, X } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 
@@ -48,7 +48,16 @@ export interface CollectionDocTabItem {
   isDirty?: boolean;
 }
 
-export type TabItem = RequestTabItem | EnvironmentTabItem | FolderReadmeTabItem | CollectionDocTabItem;
+export interface HistoryRequestTabItem {
+  id: string;
+  kind: "history-request";
+  name: string;
+  method: HttpMethod;
+  historyEntry: HistoryEntry;
+  isDirty?: boolean;
+}
+
+export type TabItem = RequestTabItem | EnvironmentTabItem | FolderReadmeTabItem | CollectionDocTabItem | HistoryRequestTabItem;
 
 interface RequestTabBarProps {
   tabs: TabItem[];
@@ -155,7 +164,7 @@ export function RequestTabBar({
             {activeTabId === tab.id && (
               <div className="absolute left-0 right-0 top-0 h-[2px] rounded-b bg-primary" />
             )}
-            {tab.kind === "request" ? (
+            {(tab.kind === "request" || tab.kind === "history-request") ? (
               <span className={cn("text-[10px] font-bold uppercase tracking-wide", METHOD_COLORS[tab.method])}>
                 {tab.method}
               </span>
