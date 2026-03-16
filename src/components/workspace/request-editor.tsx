@@ -1,6 +1,6 @@
 "use client";
 
-import type { HttpMethod } from "@/lib/types";
+import type { AuthConfig, HistoryEntry, HttpMethod } from "@/lib/types";
 import {
     getRequestDetails,
     updateRequest,
@@ -9,6 +9,7 @@ import {
     type RequestParamDetail,
 } from "@/lib/collections";
 import { sendHttpRequest, cancelHttpRequest, type HttpResponse } from "@/lib/http";
+import { getAuthConfig, saveAuthConfig } from "@/lib/settings";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { EnvFile } from "@/lib/environments";
@@ -224,9 +225,17 @@ interface RequestEditorProps {
     workspacePath: string | null;
     environments?: EnvFile[];
     onOpenEnvTab?: (envName: string) => void;
+    onHistoryEntry?: (entry: HistoryEntry) => void;
 }
 
-export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab }: RequestEditorProps) {
+const AUTH_TYPES: { value: AuthConfig["type"]; label: string }[] = [
+    { value: "none", label: "No Auth" },
+    { value: "bearer", label: "Bearer Token" },
+    { value: "basic", label: "Basic Auth" },
+    { value: "apikey", label: "API Key" },
+];
+
+export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab, onHistoryEntry }: RequestEditorProps) {
     const [details, setDetails] = useState<RequestDetails | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -239,6 +248,7 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
     const [bodyContent, setBodyContent] = useState("");
     const [verifySsl, setVerifySsl] = useState(false);
     const [proxyUrl, setProxyUrl] = useState("");
+    const [authConfig, setAuthConfig] = useState<AuthConfig>({ type: "none" });
 
     const [activeRequestTab, setActiveRequestTab] = useState<RequestTab>("params");
     const [activeResponseTab, setActiveResponseTab] = useState<ResponseTab>("pretty");
@@ -299,6 +309,19 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
             cancelled = true;
         };
     }, [requestId, collectionRelPath, workspacePath]);
+
+    // Load auth config when request changes
+    useEffect(() => {
+        if (!requestId) {
+            setAuthConfig({ type: "none" });
+            return;
+        }
+        let cancelled = false;
+        getAuthConfig(requestId).then((config) => {
+            if (!cancelled) setAuthConfig(config);
+        });
+        return () => { cancelled = true; };
+    }, [requestId]);
 
     // Debounced save helper
     const scheduleSave = useCallback(
@@ -431,12 +454,55 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
         [scheduleSave, verifySsl]
     );
 
+    const handleAuthChange = useCallback(
+        (config: AuthConfig) => {
+            setAuthConfig(config);
+            if (requestId) {
+                saveAuthConfig(requestId, config);
+            }
+        },
+        [requestId]
+    );
+
+    /** Convert current auth config into headers / query params for the request. */
+    function buildAuthHeaders(config: AuthConfig, sub: (s: string) => string): { key: string; value: string; enabled: boolean }[] {
+        switch (config.type) {
+            case "bearer": {
+                const prefix = config.prefix.trim() || "Bearer";
+                return [{ key: "Authorization", value: `${sub(prefix)} ${sub(config.token)}`, enabled: true }];
+            }
+            case "basic": {
+                const encoded = btoa(`${sub(config.username)}:${sub(config.password)}`);
+                return [{ key: "Authorization", value: `Basic ${encoded}`, enabled: true }];
+            }
+            case "apikey": {
+                if (config.addTo === "header") {
+                    return [{ key: sub(config.key), value: sub(config.value), enabled: true }];
+                }
+                return []; // query params handled separately
+            }
+            default:
+                return [];
+        }
+    }
+
+    function buildAuthParams(config: AuthConfig, sub: (s: string) => string): { key: string; value: string; enabled: boolean }[] {
+        if (config.type === "apikey" && config.addTo === "query") {
+            return [{ key: sub(config.key), value: sub(config.value), enabled: true }];
+        }
+        return [];
+    }
+
     // ── Send request handler ────────────────────────────────────────────
     const handleSend = useCallback(async () => {
         if (!url.trim()) return;
 
         const envs = environments ?? [];
         const sub = (text: string) => substituteEnvVars(text, envs);
+
+        // Build auth headers/params
+        const authHeaders = buildAuthHeaders(authConfig, sub);
+        const authParams = buildAuthParams(authConfig, sub);
 
         const reqId = crypto.randomUUID();
         setCurrentRequestId(reqId);
@@ -471,22 +537,36 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 }
             );
 
+            const userHeaders = headers
+                .filter((h) => h.key.trim() !== "" || h.value.trim() !== "")
+                .map((h) => ({ key: sub(h.key), value: sub(h.value), enabled: h.enabled }));
+            const userParams = params
+                .filter((p) => p.key.trim() !== "" || p.value.trim() !== "")
+                .map((p) => ({ key: sub(p.key), value: sub(p.value), enabled: p.enabled }));
+
             const result = await sendHttpRequest({
                 requestId: reqId,
                 method,
                 url: sub(url),
-                headers: headers
-                    .filter((h) => h.key.trim() !== "" || h.value.trim() !== "")
-                    .map((h) => ({ key: sub(h.key), value: sub(h.value), enabled: h.enabled })),
-                params: params
-                    .filter((p) => p.key.trim() !== "" || p.value.trim() !== "")
-                    .map((p) => ({ key: sub(p.key), value: sub(p.value), enabled: p.enabled })),
+                headers: [...userHeaders, ...authHeaders],
+                params: [...userParams, ...authParams],
                 body: { type: bodyType, content: sub(bodyContent) },
                 settings: { verifySsl, proxyUrl: proxyUrl.trim() || null },
             });
             setResponseData(result);
             setStreamingBody("");
             setIsCollapsed(false);
+
+            // Record to history
+            onHistoryEntry?.({
+                id: reqId,
+                method,
+                url: sub(url),
+                status: result.status,
+                statusText: result.statusText,
+                timeMs: result.timeMs,
+                timestamp: new Date().toISOString(),
+            });
         } catch (err: unknown) {
             let msg: string;
             if (err instanceof Error) {
@@ -502,6 +582,17 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
             setResponseData(null);
             setStreamingBody("");
             setIsCollapsed(false);
+
+            // Record failed requests to history too
+            onHistoryEntry?.({
+                id: reqId,
+                method,
+                url: sub(url),
+                status: null,
+                statusText: null,
+                timeMs: null,
+                timestamp: new Date().toISOString(),
+            });
         } finally {
             if (unlistenProgress) unlistenProgress();
             if (unlistenChunk) unlistenChunk();
@@ -509,7 +600,7 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
             setCurrentRequestId(null);
             setProgress(null);
         }
-    }, [method, url, headers, params, bodyType, bodyContent, environments, verifySsl, proxyUrl]);
+    }, [method, url, headers, params, bodyType, bodyContent, environments, verifySsl, proxyUrl, authConfig, onHistoryEntry]);
 
     const handleCancel = useCallback(async () => {
         if (currentRequestId) {
@@ -787,8 +878,168 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                         </div>
                     )}
                     {activeRequestTab === "auth" && (
-                        <div className="p-4 text-sm text-muted-foreground/50 italic">
-                            Auth configuration will appear here.
+                        <div className="p-4 space-y-4">
+                            <div>
+                                <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                                    Authorization
+                                </h3>
+                                <div className="flex items-center gap-3 mb-4">
+                                    {AUTH_TYPES.map((at) => (
+                                        <label key={at.value} className="flex items-center gap-1.5 text-[13px] text-muted-foreground/70 cursor-pointer hover:text-foreground transition-colors duration-150">
+                                            <input
+                                                type="radio"
+                                                name="auth-type"
+                                                checked={authConfig.type === at.value}
+                                                onChange={() => {
+                                                    let next: AuthConfig;
+                                                    switch (at.value) {
+                                                        case "bearer":
+                                                            next = { type: "bearer", token: "", prefix: "Bearer" };
+                                                            break;
+                                                        case "basic":
+                                                            next = { type: "basic", username: "", password: "" };
+                                                            break;
+                                                        case "apikey":
+                                                            next = { type: "apikey", key: "", value: "", addTo: "header" };
+                                                            break;
+                                                        default:
+                                                            next = { type: "none" };
+                                                    }
+                                                    handleAuthChange(next);
+                                                }}
+                                                className="accent-primary"
+                                            />
+                                            {at.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {authConfig.type === "bearer" && (
+                                <div className="space-y-3 max-w-lg">
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Prefix
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={authConfig.prefix}
+                                            onChange={(e) => handleAuthChange({ ...authConfig, prefix: e.target.value })}
+                                            placeholder="Bearer"
+                                            className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Token
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={authConfig.token}
+                                            onChange={(e) => handleAuthChange({ ...authConfig, token: e.target.value })}
+                                            placeholder="Enter token..."
+                                            className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] font-mono outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                        />
+                                        <p className="mt-1.5 text-[11px] text-muted-foreground/50">
+                                            The token will be sent as <code className="rounded bg-muted px-1 py-0.5 text-[10px]">{authConfig.prefix || "Bearer"} &lt;token&gt;</code> in the Authorization header.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {authConfig.type === "basic" && (
+                                <div className="space-y-3 max-w-lg">
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Username
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={authConfig.username}
+                                            onChange={(e) => handleAuthChange({ ...authConfig, username: e.target.value })}
+                                            placeholder="Enter username..."
+                                            className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Password
+                                        </label>
+                                        <input
+                                            type="password"
+                                            value={authConfig.password}
+                                            onChange={(e) => handleAuthChange({ ...authConfig, password: e.target.value })}
+                                            placeholder="Enter password..."
+                                            className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                        />
+                                        <p className="mt-1.5 text-[11px] text-muted-foreground/50">
+                                            Credentials will be Base64-encoded and sent as <code className="rounded bg-muted px-1 py-0.5 text-[10px]">Basic &lt;encoded&gt;</code> in the Authorization header.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {authConfig.type === "apikey" && (
+                                <div className="space-y-3 max-w-lg">
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Key
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={authConfig.key}
+                                            onChange={(e) => handleAuthChange({ ...authConfig, key: e.target.value })}
+                                            placeholder="e.g. X-API-Key"
+                                            className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Value
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={authConfig.value}
+                                            onChange={(e) => handleAuthChange({ ...authConfig, value: e.target.value })}
+                                            placeholder="Enter API key value..."
+                                            className="w-full rounded-md border border-border bg-transparent px-3 py-1.5 text-[13px] font-mono outline-none placeholder:text-muted-foreground/30 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                                            Add To
+                                        </label>
+                                        <div className="flex items-center gap-4">
+                                            <label className="flex items-center gap-1.5 text-[13px] text-muted-foreground/70 cursor-pointer hover:text-foreground transition-colors duration-150">
+                                                <input
+                                                    type="radio"
+                                                    name="apikey-addto"
+                                                    checked={authConfig.addTo === "header"}
+                                                    onChange={() => handleAuthChange({ ...authConfig, addTo: "header" })}
+                                                    className="accent-primary"
+                                                />
+                                                Header
+                                            </label>
+                                            <label className="flex items-center gap-1.5 text-[13px] text-muted-foreground/70 cursor-pointer hover:text-foreground transition-colors duration-150">
+                                                <input
+                                                    type="radio"
+                                                    name="apikey-addto"
+                                                    checked={authConfig.addTo === "query"}
+                                                    onChange={() => handleAuthChange({ ...authConfig, addTo: "query" })}
+                                                    className="accent-primary"
+                                                />
+                                                Query Param
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {authConfig.type === "none" && (
+                                <p className="text-[13px] text-muted-foreground/50 italic">
+                                    This request does not use any authorization.
+                                </p>
+                            )}
                         </div>
                     )}
                     {(activeRequestTab === "pre-req" || activeRequestTab === "tests") && (

@@ -29,6 +29,9 @@ yarn-debug.log*
 yarn-error.log*
 .bun-debug.log*
 
+# lockfiles (project uses bun)
+package-lock.json
+
 # local env files
 .env*.local
 
