@@ -1,4 +1,5 @@
 import type { Store } from "@tauri-apps/plugin-store";
+import type { AuthConfig, HistoryEntry } from "./types";
 
 export interface RecentFolder {
     path: string;
@@ -41,10 +42,12 @@ const KEYS = {
     PINNED_WORKSPACES: "pinnedWorkspaces",
     LAST_SCOPE: "lastScope",
     SIDEBAR_EXPANDED: "sidebarExpanded",
+    REQUEST_HISTORY: "requestHistory",
 } as const;
 
 const STORE_FILE = "settings.json";
 const MAX_RECENT_FOLDERS = 10;
+const MAX_HISTORY_ENTRIES = 50;
 
 let storeInstance: Store | null = null;
 let storeInitPromise: Promise<Store | null> | null = null;
@@ -282,6 +285,73 @@ export async function saveSidebarExpanded(expanded: boolean): Promise<void> {
         if (!store) return;
 
         await store.set(KEYS.SIDEBAR_EXPANDED, expanded);
+        await store.save();
+    } catch {}
+}
+
+// ── Request History ─────────────────────────────────────────────────────────
+
+export async function getRequestHistory(): Promise<HistoryEntry[]> {
+    try {
+        const store = await getStore();
+        if (!store) return [];
+        return (await store.get<HistoryEntry[]>(KEYS.REQUEST_HISTORY)) ?? [];
+    } catch {
+        return [];
+    }
+}
+
+export async function addHistoryEntry(entry: HistoryEntry): Promise<HistoryEntry[]> {
+    try {
+        const store = await getStore();
+        if (!store) return [];
+
+        const existing =
+            (await store.get<HistoryEntry[]>(KEYS.REQUEST_HISTORY)) ?? [];
+        const updated = [entry, ...existing].slice(0, MAX_HISTORY_ENTRIES);
+        await store.set(KEYS.REQUEST_HISTORY, updated);
+        await store.save();
+        return updated;
+    } catch {
+        return [];
+    }
+}
+
+export async function clearRequestHistory(): Promise<void> {
+    try {
+        const store = await getStore();
+        if (!store) return;
+
+        await store.set(KEYS.REQUEST_HISTORY, []);
+        await store.save();
+    } catch {}
+}
+
+// ── Per-request Auth Config ─────────────────────────────────────────────────
+
+function authKey(requestId: string): string {
+    return `auth:${requestId}`;
+}
+
+export async function getAuthConfig(requestId: string): Promise<AuthConfig> {
+    try {
+        const store = await getStore();
+        if (!store) return { type: "none" };
+        return (await store.get<AuthConfig>(authKey(requestId))) ?? { type: "none" };
+    } catch {
+        return { type: "none" };
+    }
+}
+
+export async function saveAuthConfig(
+    requestId: string,
+    config: AuthConfig
+): Promise<void> {
+    try {
+        const store = await getStore();
+        if (!store) return;
+
+        await store.set(authKey(requestId), config);
         await store.save();
     } catch {}
 }
