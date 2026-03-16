@@ -741,7 +741,7 @@ function WorkspaceContent() {
                     onClick={() => handleSelectHistoryEntry(entry)}
                     role="button"
                     tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSelectHistoryEntry(entry); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleSelectHistoryEntry(entry); } }}
                   >
                     <span className={`text-[10px] font-bold uppercase shrink-0 w-12 ${HISTORY_METHOD_COLORS[entry.method] ?? "text-muted-foreground"}`}>
                       {entry.method}
@@ -881,8 +881,8 @@ function WorkspaceContent() {
               historyInitialData={{
                 method: activeTab.historyEntry.method,
                 url: activeTab.historyEntry.url,
-                headers: activeTab.historyEntry.headers?.map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })) ?? [],
-                params: activeTab.historyEntry.params?.map((p) => ({ key: p.key, value: p.value, enabled: p.enabled })) ?? [],
+                headers: activeTab.historyEntry.headers ?? [],
+                params: activeTab.historyEntry.params ?? [],
                 bodyType: activeTab.historyEntry.body?.type ?? "none",
                 bodyContent: activeTab.historyEntry.body?.content ?? "",
               }}
