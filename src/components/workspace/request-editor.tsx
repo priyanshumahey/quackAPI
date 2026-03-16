@@ -472,7 +472,10 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 return [{ key: "Authorization", value: `${sub(prefix)} ${sub(config.token)}`, enabled: true }];
             }
             case "basic": {
-                const encoded = btoa(`${sub(config.username)}:${sub(config.password)}`);
+                const credentials = `${sub(config.username)}:${sub(config.password)}`;
+                const bytes = new TextEncoder().encode(credentials);
+                const binary = Array.from(bytes, (b) => String.fromCodePoint(b)).join("");
+                const encoded = btoa(binary);
                 return [{ key: "Authorization", value: `Basic ${encoded}`, enabled: true }];
             }
             case "apikey": {
