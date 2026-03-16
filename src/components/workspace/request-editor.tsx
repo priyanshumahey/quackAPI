@@ -219,6 +219,15 @@ function KVTable({
     );
 }
 
+interface HistoryInitialData {
+    method: HttpMethod;
+    url: string;
+    headers: KVRow[];
+    params: KVRow[];
+    bodyType: string;
+    bodyContent: string;
+}
+
 interface RequestEditorProps {
     requestId: string | null;
     collectionRelPath: string | null;
@@ -226,6 +235,7 @@ interface RequestEditorProps {
     environments?: EnvFile[];
     onOpenEnvTab?: (envName: string) => void;
     onHistoryEntry?: (entry: HistoryEntry) => void;
+    historyInitialData?: HistoryInitialData;
 }
 
 const AUTH_TYPES: { value: AuthConfig["type"]; label: string }[] = [
@@ -235,7 +245,7 @@ const AUTH_TYPES: { value: AuthConfig["type"]; label: string }[] = [
     { value: "apikey", label: "API Key" },
 ];
 
-export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab, onHistoryEntry }: RequestEditorProps) {
+export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab, onHistoryEntry, historyInitialData }: RequestEditorProps) {
     const [details, setDetails] = useState<RequestDetails | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -309,6 +319,19 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
             cancelled = true;
         };
     }, [requestId, collectionRelPath, workspacePath]);
+
+    // Initialize from history data when opened from history panel
+    useEffect(() => {
+        if (!historyInitialData) return;
+        setMethod(historyInitialData.method);
+        setUrl(historyInitialData.url);
+        setHeaders(historyInitialData.headers);
+        setParams(historyInitialData.params);
+        setBodyType(historyInitialData.bodyType);
+        setBodyContent(historyInitialData.bodyContent);
+        setResponseData(null);
+        setSendError(null);
+    }, [historyInitialData]);
 
     // Load auth config when request changes
     useEffect(() => {
@@ -566,6 +589,9 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 statusText: result.statusText,
                 timeMs: result.timeMs,
                 timestamp: new Date().toISOString(),
+                headers: headers.filter((h) => h.key.trim() !== "" || h.value.trim() !== ""),
+                params: params.filter((p) => p.key.trim() !== "" || p.value.trim() !== ""),
+                body: { type: bodyType as "none" | "json" | "text" | "form-data" | "x-www-form-urlencoded", content: bodyContent },
             });
         } catch (err: unknown) {
             let msg: string;
@@ -592,6 +618,9 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 statusText: null,
                 timeMs: null,
                 timestamp: new Date().toISOString(),
+                headers: headers.filter((h) => h.key.trim() !== "" || h.value.trim() !== ""),
+                params: params.filter((p) => p.key.trim() !== "" || p.value.trim() !== ""),
+                body: { type: bodyType as "none" | "json" | "text" | "form-data" | "x-www-form-urlencoded", content: bodyContent },
             });
         } finally {
             if (unlistenProgress) unlistenProgress();
@@ -688,7 +717,7 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
         { id: "settings", label: "Settings" },
     ];
 
-    if (!requestId) {
+    if (!requestId && !historyInitialData) {
         return (
             <div className="flex h-full items-center justify-center select-none">
                 <div className="text-center">

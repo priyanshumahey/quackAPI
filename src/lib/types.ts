@@ -84,4 +84,7 @@ export interface HistoryEntry {
   statusText: string | null;
   timeMs: number | null;
   timestamp: string; // ISO 8601
+  headers: RequestHeader[];
+  params: QueryParam[];
+  body: RequestBody;
 }

@@ -30,9 +30,9 @@ import {
   updateEnvVariable,
   type EnvFile
 } from "@/lib/environments";
-import { addHistoryEntry, clearRequestHistory, getRequestHistory } from "@/lib/settings";
+import { addHistoryEntry, clearRequestHistory, deleteHistoryEntry, getRequestHistory } from "@/lib/settings";
 import type { HistoryEntry } from "@/lib/types";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityBar, type ActivityTab } from "./activity-bar";
 import { CollectionDocView } from "./collection-doc-view";
@@ -47,6 +47,7 @@ import {
   type CollectionDocTabItem,
   type EnvironmentTabItem,
   type FolderReadmeTabItem,
+  type HistoryRequestTabItem,
   type RequestTabItem,
   type TabItem,
 } from "./request-tab-bar";
@@ -128,6 +129,29 @@ function WorkspaceContent() {
     await clearRequestHistory();
     setHistory([]);
   }, []);
+
+  const handleDeleteHistoryEntry = useCallback(async (entryId: string) => {
+    const updated = await deleteHistoryEntry(entryId);
+    setHistory(updated);
+  }, []);
+
+  const handleSelectHistoryEntry = useCallback(
+    (entry: HistoryEntry) => {
+      const tabId = `history-${entry.id}`;
+      if (!openTabs.some((t) => t.id === tabId)) {
+        const newTab: HistoryRequestTabItem = {
+          id: tabId,
+          kind: "history-request",
+          name: entry.url,
+          method: entry.method,
+          historyEntry: entry,
+        };
+        setOpenTabs((prev) => [...prev, newTab]);
+      }
+      setActiveTabId(tabId);
+    },
+    [openTabs]
+  );
 
   const loadEnvs = useCallback(async () => {
     if (!folderPath) return;
@@ -710,10 +734,14 @@ function WorkspaceContent() {
             ) : (
               <div className="flex-1 overflow-y-auto">
                 {history.map((entry) => (
-                  <button
+                  <div
                     key={entry.id}
-                    className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left hover:bg-muted/40 transition-colors cursor-pointer"
+                    className="group flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left hover:bg-muted/40 transition-colors cursor-pointer"
                     title={entry.url}
+                    onClick={() => handleSelectHistoryEntry(entry)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleSelectHistoryEntry(entry); }}
                   >
                     <span className={`text-[10px] font-bold uppercase shrink-0 w-12 ${HISTORY_METHOD_COLORS[entry.method] ?? "text-muted-foreground"}`}>
                       {entry.method}
@@ -738,7 +766,17 @@ function WorkspaceContent() {
                         </span>
                       </div>
                     </div>
-                  </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteHistoryEntry(entry.id);
+                      }}
+                      className="shrink-0 text-muted-foreground/30 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                      title="Delete entry"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -830,6 +868,24 @@ function WorkspaceContent() {
               workspacePath={folderPath}
               environments={environments}
               onOpenEnvTab={handleSelectEnv}
+            />
+          ) : activeTab?.kind === "history-request" ? (
+            <RequestEditor
+              key={activeTab.id}
+              requestId={null}
+              collectionRelPath={null}
+              workspacePath={folderPath}
+              environments={environments}
+              onOpenEnvTab={handleSelectEnv}
+              onHistoryEntry={handleHistoryEntry}
+              historyInitialData={{
+                method: activeTab.historyEntry.method,
+                url: activeTab.historyEntry.url,
+                headers: activeTab.historyEntry.headers?.map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })) ?? [],
+                params: activeTab.historyEntry.params?.map((p) => ({ key: p.key, value: p.value, enabled: p.enabled })) ?? [],
+                bodyType: activeTab.historyEntry.body?.type ?? "none",
+                bodyContent: activeTab.historyEntry.body?.content ?? "",
+              }}
             />
           ) : (
             <RequestEditor
