@@ -116,7 +116,13 @@ pub fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
         .filter_map(|h| {
             let obj = h.as_object()?;
             Some(KvParam {
-                key: obj.get("key")?.as_str().unwrap_or("").to_string(),
+                key: obj
+                    .get("key")
+                    .or_else(|| obj.get("name"))
+                    ?
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
                 value: obj.get("value")?.as_str().unwrap_or("").to_string(),
                 enabled: obj.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
             })
@@ -129,7 +135,13 @@ pub fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
         .filter_map(|p| {
             let obj = p.as_object()?;
             Some(KvParam {
-                key: obj.get("key")?.as_str().unwrap_or("").to_string(),
+                key: obj
+                    .get("key")
+                    .or_else(|| obj.get("name"))
+                    ?
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
                 value: obj.get("value")?.as_str().unwrap_or("").to_string(),
                 enabled: obj.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
             })
