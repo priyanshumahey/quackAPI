@@ -224,9 +224,10 @@ interface RequestEditorProps {
     workspacePath: string | null;
     environments?: EnvFile[];
     onOpenEnvTab?: (envName: string) => void;
+    onHistoryUpdated?: () => void;
 }
 
-export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab }: RequestEditorProps) {
+export function RequestEditor({ requestId, collectionRelPath, workspacePath, environments, onOpenEnvTab, onHistoryUpdated }: RequestEditorProps) {
     const [details, setDetails] = useState<RequestDetails | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -471,6 +472,15 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                 }
             );
 
+            const activeEnv = (environments ?? []).find((e) => e.isEnabled) ?? null;
+            const envSnapshot: { key: string; value: string }[] = [];
+            for (const env of environments ?? []) {
+                if (!env.isEnabled) continue;
+                for (const v of env.variables) {
+                    if (v.enabled) envSnapshot.push({ key: v.key, value: v.value });
+                }
+            }
+
             const result = await sendHttpRequest({
                 requestId: reqId,
                 method,
@@ -483,6 +493,19 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
                     .map((p) => ({ key: sub(p.key), value: sub(p.value), enabled: p.enabled })),
                 body: { type: bodyType, content: sub(bodyContent) },
                 settings: { verifySsl, proxyUrl: proxyUrl.trim() || null },
+                history: workspacePath
+                    ? {
+                          workspacePath,
+                          collectionRequestId: requestId,
+                          requestName: details?.name ?? null,
+                          collectionPath: collectionRelPath,
+                          envActive: activeEnv?.name ?? null,
+                          envSnapshot,
+                          replayOfId: null,
+                          tags: null,
+                          skip: false,
+                      }
+                    : null,
             });
             setResponseData(result);
             setStreamingBody("");
@@ -508,8 +531,9 @@ export function RequestEditor({ requestId, collectionRelPath, workspacePath, env
             setIsSending(false);
             setCurrentRequestId(null);
             setProgress(null);
+            onHistoryUpdated?.();
         }
-    }, [method, url, headers, params, bodyType, bodyContent, environments, verifySsl, proxyUrl]);
+    }, [method, url, headers, params, bodyType, bodyContent, environments, verifySsl, proxyUrl, workspacePath, requestId, details?.name, collectionRelPath, onHistoryUpdated]);
 
     const handleCancel = useCallback(async () => {
         if (currentRequestId) {

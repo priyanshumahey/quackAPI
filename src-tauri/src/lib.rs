@@ -64,6 +64,7 @@ pub fn run() {
         .manage(AppExitControl::new())
         .manage(commands::HttpClientState::new())
         .manage(commands::WebSocketState::new())
+        .manage(commands::HistoryState::new())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_stronghold::Builder::new(|_pass| todo!()).build())
         .plugin(tauri_plugin_opener::init())
@@ -110,6 +111,12 @@ pub fn run() {
             commands::install_cli,
             commands::uninstall_cli,
             commands::check_cli_installed,
+            commands::history_list,
+            commands::history_get,
+            commands::history_read_blob,
+            commands::history_delete,
+            commands::history_clear,
+            commands::history_redaction_defaults,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

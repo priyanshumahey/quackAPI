@@ -38,6 +38,7 @@ import { CollectionPanel } from "./collection-panel";
 import { EnvironmentEditor } from "./environment-editor";
 import { EnvironmentPanel } from "./environment-panel";
 import { FolderReadmeView } from "./folder-readme-view";
+import { HistoryPanel } from "./history-panel";
 import { RequestEditor } from "./request-editor";
 import { WebSocketEditor } from "./websocket-editor";
 import {
@@ -88,6 +89,11 @@ function WorkspaceContent() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [environments, setEnvironments] = useState<EnvFile[]>([]);
   const [collections, setCollections] = useState<CollectionTreeItem[]>([]);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  const bumpHistory = useCallback(() => {
+    setHistoryRefreshKey((k) => k + 1);
+  }, []);
 
   const loadEnvs = useCallback(async () => {
     if (!folderPath) return;
@@ -143,6 +149,27 @@ function WorkspaceContent() {
       setActiveTabId(id);
     },
     [openTabs, collections]
+  );
+
+  const handleReplayHistory = useCallback(
+    (entry: import("@/lib/history").HistoryEntry) => {
+      if (!entry.requestId) {
+        alert(
+          "This history entry was not linked to a saved collection request, so it cannot be replayed.",
+        );
+        return;
+      }
+      const req = findRequestInTree(collections, entry.requestId);
+      if (!req) {
+        alert(
+          "The original collection request for this history entry no longer exists.",
+        );
+        return;
+      }
+      handleSelectRequest(req.id);
+      setActiveActivity("collections");
+    },
+    [collections, handleSelectRequest],
   );
 
   // ── Collection CRUD handlers ──────────────────────────
@@ -648,16 +675,11 @@ function WorkspaceContent() {
           />
         )}
         {activeActivity === "history" && (
-          <div className="flex h-full flex-col border-r border-border bg-background select-none">
-            <div className="flex items-center border-b border-border px-3 py-2.5">
-              <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-                History
-              </span>
-            </div>
-            <div className="flex flex-1 items-center justify-center">
-              <p className="text-[13px] text-muted-foreground/50 italic">No history yet</p>
-            </div>
-          </div>
+          <HistoryPanel
+            workspacePath={folderPath}
+            refreshKey={historyRefreshKey}
+            onReplay={handleReplayHistory}
+          />
         )}
       </ResizablePanel>
 
@@ -745,6 +767,7 @@ function WorkspaceContent() {
               workspacePath={folderPath}
               environments={environments}
               onOpenEnvTab={handleSelectEnv}
+              onHistoryUpdated={bumpHistory}
             />
           ) : (
             <RequestEditor
@@ -753,6 +776,7 @@ function WorkspaceContent() {
               workspacePath={folderPath}
               environments={environments}
               onOpenEnvTab={handleSelectEnv}
+              onHistoryUpdated={bumpHistory}
             />
           )}
         </div>

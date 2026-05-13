@@ -13,8 +13,10 @@ USAGE:
     quack run <request> --verbose       Run with full response details
 
 OPTIONS:
-    -d, --dir <path>     Workspace directory (default: current directory)
-    -h, --help           Show this help message
+    -d, --dir <path>      Workspace directory (default: current directory)
+    -h, --help            Show this help message
+        --no-history      Do not record this run in the history store
+        --history-tag T   Tag history entries (e.g. CI run id) for filtering
 
 EXAMPLES:
     quack list
@@ -31,6 +33,8 @@ struct CliArgs {
     command: Command,
     workspace_path: String,
     verbose: bool,
+    no_history: bool,
+    history_tag: Option<String>,
 }
 
 #[derive(Debug)]
@@ -47,6 +51,8 @@ fn parse_args() -> CliArgs {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
     let mut verbose = false;
+    let mut no_history = false;
+    let mut history_tag: Option<String> = None;
     let mut positional: Vec<String> = vec![];
 
     let mut i = 0;
@@ -57,6 +63,8 @@ fn parse_args() -> CliArgs {
                     command: Command::Help,
                     workspace_path,
                     verbose,
+                    no_history,
+                    history_tag,
                 };
             }
             "-d" | "--dir" => {
@@ -70,6 +78,18 @@ fn parse_args() -> CliArgs {
             }
             "-v" | "--verbose" => {
                 verbose = true;
+            }
+            "--no-history" => {
+                no_history = true;
+            }
+            "--history-tag" => {
+                i += 1;
+                if i < args.len() {
+                    history_tag = Some(args[i].clone());
+                } else {
+                    eprintln!("Error: --history-tag requires a value");
+                    process::exit(1);
+                }
             }
             other => {
                 positional.push(other.to_string());
@@ -102,6 +122,8 @@ fn parse_args() -> CliArgs {
         command,
         workspace_path,
         verbose,
+        no_history,
+        history_tag,
     }
 }
 
@@ -144,7 +166,13 @@ fn cmd_list(workspace_path: &str) {
     }
 }
 
-async fn cmd_run(workspace_path: &str, query: &str, verbose: bool) {
+async fn cmd_run(
+    workspace_path: &str,
+    query: &str,
+    verbose: bool,
+    no_history: bool,
+    history_tag: Option<String>,
+) {
     let env_vars = match core::environments::resolve_env_vars(workspace_path) {
         Ok(v) => v,
         Err(e) => {
@@ -153,7 +181,7 @@ async fn cmd_run(workspace_path: &str, query: &str, verbose: bool) {
         }
     };
 
-    let (_col_path, details) = match core::collections::find_request(workspace_path, query) {
+    let (col_path, details) = match core::collections::find_request(workspace_path, query) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{e}");
@@ -175,9 +203,38 @@ async fn cmd_run(workspace_path: &str, query: &str, verbose: bool) {
         details.method, resolved_url, details.name
     );
 
-    let response = match core::http::execute_request(&details, &env_vars).await {
-        Ok(r) => r,
+    let history_handle = if no_history {
+        None
+    } else {
+        open_cli_history_entry(workspace_path, &details, &col_path, &env_vars, history_tag.as_deref())
+    };
+
+    let response_result = core::http::execute_request(&details, &env_vars).await;
+
+    let response = match response_result {
+        Ok(r) => {
+            if let Some((store, id)) = &history_handle {
+                let headers_kv: Vec<(String, String)> = r
+                    .headers
+                    .iter()
+                    .map(|h| (h.key.clone(), h.value.clone()))
+                    .collect();
+                let result = core::history::HttpResult {
+                    status: r.status,
+                    status_text: r.status_text.clone(),
+                    headers: headers_kv,
+                    body: r.body.as_bytes().to_vec(),
+                    is_binary: false,
+                    time_ms: r.time_ms,
+                };
+                let _ = store.finalize_http_ok(id, &result);
+            }
+            r
+        }
         Err(e) => {
+            if let Some((store, id)) = &history_handle {
+                let _ = store.finalize_http_err(id, &e);
+            }
             eprintln!("\x1b[31mError: {e}\x1b[0m");
             process::exit(1);
         }
@@ -224,6 +281,74 @@ async fn cmd_run(workspace_path: &str, query: &str, verbose: bool) {
     println!("{}", response.body);
 }
 
+fn open_cli_history_entry(
+    workspace_path: &str,
+    details: &core::collections::RequestDetails,
+    col_path: &str,
+    env_vars: &std::collections::HashMap<String, String>,
+    tag: Option<&str>,
+) -> Option<(core::history::HistoryStore, core::history::EntryId)> {
+    let store = match core::history::HistoryStore::open(workspace_path, None) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("\x1b[2mhistory: open failed: {e}\x1b[0m");
+            return None;
+        }
+    };
+
+    let resolved_url = core::environments::substitute_env_vars(&details.url, env_vars);
+    let headers: Vec<(String, String)> = details
+        .headers
+        .iter()
+        .filter(|kv| kv.enabled)
+        .map(|kv| {
+            (
+                core::environments::substitute_env_vars(&kv.key, env_vars),
+                core::environments::substitute_env_vars(&kv.value, env_vars),
+            )
+        })
+        .collect();
+    let params: Vec<(String, String)> = details
+        .params
+        .iter()
+        .filter(|kv| kv.enabled)
+        .map(|kv| {
+            (
+                core::environments::substitute_env_vars(&kv.key, env_vars),
+                core::environments::substitute_env_vars(&kv.value, env_vars),
+            )
+        })
+        .collect();
+    let env_snapshot: Vec<(String, String)> = env_vars
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    let attempt = core::history::HttpAttempt {
+        request_id: Some(details.id.clone()),
+        request_name: Some(details.name.clone()),
+        collection_path: Some(col_path.to_string()),
+        method: details.method.clone(),
+        url: resolved_url,
+        headers,
+        params,
+        body_type: details.body.body_type.clone(),
+        body_content: core::environments::substitute_env_vars(&details.body.content, env_vars),
+        env_active: None,
+        env_snapshot,
+        replay_of_id: None,
+        tags: tag.map(|t| t.to_string()),
+    };
+
+    match store.begin_http(&attempt) {
+        Ok(id) => Some((store, id)),
+        Err(e) => {
+            eprintln!("\x1b[2mhistory: begin_http failed: {e}\x1b[0m");
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args = parse_args();
@@ -231,6 +356,15 @@ async fn main() {
     match args.command {
         Command::Help => print_usage(),
         Command::List => cmd_list(&args.workspace_path),
-        Command::Run { query } => cmd_run(&args.workspace_path, &query, args.verbose).await,
+        Command::Run { query } => {
+            cmd_run(
+                &args.workspace_path,
+                &query,
+                args.verbose,
+                args.no_history,
+                args.history_tag,
+            )
+            .await;
+        }
     }
 }

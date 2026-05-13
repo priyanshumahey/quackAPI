@@ -5,6 +5,19 @@ export interface RequestSettings {
     proxyUrl: string | null;
 }
 
+export interface HistoryMeta {
+    workspacePath: string;
+    collectionRequestId: string | null;
+    requestName: string | null;
+    collectionPath: string | null;
+    envActive: string | null;
+    envSnapshot: { key: string; value: string }[];
+    replayOfId: string | null;
+    tags: string | null;
+    /** If true, the backend skips writing a history entry for this call. */
+    skip: boolean;
+}
+
 export interface SendRequestPayload {
     requestId: string;
     method: string;
@@ -13,6 +26,7 @@ export interface SendRequestPayload {
     params: { key: string; value: string; enabled: boolean }[];
     body: { type: string; content: string };
     settings?: RequestSettings;
+    history?: HistoryMeta | null;
 }
 
 export interface HttpResponse {

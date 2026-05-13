@@ -219,6 +219,7 @@ interface WebSocketEditorProps {
     workspacePath?: string | null;
     environments: EnvFile[];
     onOpenEnvTab?: (envName: string) => void;
+    onHistoryUpdated?: () => void;
 }
 
 export function WebSocketEditor({
@@ -227,6 +228,7 @@ export function WebSocketEditor({
     workspacePath,
     environments,
     onOpenEnvTab,
+    onHistoryUpdated,
 }: WebSocketEditorProps) {
     const [url, setUrl] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -243,6 +245,7 @@ export function WebSocketEditor({
     const [messageType, setMessageType] = useState<"text" | "json">("text");
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const msgCounter = useRef(0);
+    const [requestName, setRequestName] = useState<string | null>(null);
 
     useEffect(() => {
         if (!connectionId || !collectionRelPath || !workspacePath) return;
@@ -253,6 +256,7 @@ export function WebSocketEditor({
             .then((data) => {
                 if (cancelled) return;
                 setUrl(data.url);
+                setRequestName(data.name ?? null);
                 setHeaders(
                     data.headers
                         .filter((h) => h.key)
@@ -320,10 +324,12 @@ export function WebSocketEditor({
                                 },
                             ]);
                         }
+                        onHistoryUpdated?.();
                         break;
                     case "error":
                         setError(ev.message);
                         setStatus("disconnected");
+                        onHistoryUpdated?.();
                         break;
                 }
             });
@@ -339,7 +345,7 @@ export function WebSocketEditor({
             cancelled = true;
             unlisten?.();
         };
-    }, [connectionId]);
+    }, [connectionId, onHistoryUpdated]);
 
     const handleConnect = useCallback(async () => {
         setError(null);
@@ -362,6 +368,15 @@ export function WebSocketEditor({
             .filter(Boolean);
 
         try {
+            const activeEnv = environments.find((e) => e.isEnabled) ?? null;
+            const envSnapshot: { key: string; value: string }[] = [];
+            for (const env of environments) {
+                if (!env.isEnabled) continue;
+                for (const v of env.variables) {
+                    if (v.enabled) envSnapshot.push({ key: v.key, value: v.value });
+                }
+            }
+
             await wsConnect({
                 connectionId,
                 url: wsUrl,
@@ -373,12 +388,25 @@ export function WebSocketEditor({
                         enabled: true,
                     })),
                 protocols: protocolList,
+                history: workspacePath
+                    ? {
+                          workspacePath,
+                          collectionRequestId: connectionId,
+                          requestName,
+                          collectionPath: collectionRelPath ?? null,
+                          envActive: activeEnv?.name ?? null,
+                          envSnapshot,
+                          skip: false,
+                      }
+                    : null,
             });
+            onHistoryUpdated?.();
         } catch (e) {
             setError(String(e));
             setStatus("disconnected");
+            onHistoryUpdated?.();
         }
-    }, [url, headers, protocols, environments, connectionId]);
+    }, [url, headers, protocols, environments, connectionId, workspacePath, collectionRelPath, requestName, onHistoryUpdated]);
 
     const handleDisconnect = useCallback(async () => {
         try {

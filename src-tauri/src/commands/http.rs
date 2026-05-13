@@ -45,6 +45,37 @@ pub struct SendRequestPayload {
     pub headers: Vec<KvParam>,
     pub params: Vec<KvParam>,
     pub body: BodyPayload,
+    #[serde(default)]
+    pub history: Option<HistoryMeta>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryMeta {
+    pub workspace_path: String,
+    #[serde(default)]
+    pub collection_request_id: Option<String>,
+    #[serde(default)]
+    pub request_name: Option<String>,
+    #[serde(default)]
+    pub collection_path: Option<String>,
+    #[serde(default)]
+    pub env_active: Option<String>,
+    #[serde(default)]
+    pub env_snapshot: Vec<KvSnapshot>,
+    #[serde(default)]
+    pub replay_of_id: Option<String>,
+    #[serde(default)]
+    pub tags: Option<String>,
+    /// When true the request is executed but no history row is inserted.
+    #[serde(default)]
+    pub skip: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct KvSnapshot {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,7 +168,100 @@ pub async fn send_http_request(
     app: AppHandle,
     payload: SendRequestPayload,
     state: State<'_, HttpClientState>,
+    history: State<'_, crate::commands::HistoryState>,
 ) -> Result<HttpResponse, String> {
+    let entry = open_history_entry(&history, &payload);
+
+    let outcome = execute_http_inner(&app, &payload, &state).await;
+
+    match (&entry, &outcome) {
+        (Some((store, id)), Ok((resp, bytes))) => {
+            let result = crate::core::history::HttpResult {
+                status: resp.status,
+                status_text: resp.status_text.clone(),
+                headers: resp
+                    .headers
+                    .iter()
+                    .map(|h| (h.key.clone(), h.value.clone()))
+                    .collect(),
+                body: bytes.clone(),
+                is_binary: resp.is_binary,
+                time_ms: resp.time_ms,
+            };
+            let _ = store.finalize_http_ok(id, &result);
+        }
+        (Some((store, id)), Err(err_msg)) => {
+            let _ = store.finalize_http_err(id, err_msg);
+        }
+        _ => {}
+    }
+
+    outcome.map(|(resp, _)| resp)
+}
+
+fn open_history_entry(
+    state: &tauri::State<'_, crate::commands::HistoryState>,
+    payload: &SendRequestPayload,
+) -> Option<(crate::core::history::HistoryStore, crate::core::history::EntryId)> {
+    let meta = payload.history.as_ref()?;
+    if meta.skip {
+        return None;
+    }
+    let store = match state.store_for(&meta.workspace_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("history: failed to open store: {e}");
+            return None;
+        }
+    };
+
+    let attempt = crate::core::history::HttpAttempt {
+        request_id: meta.collection_request_id.clone(),
+        request_name: meta.request_name.clone(),
+        collection_path: meta.collection_path.clone(),
+        method: payload.method.clone(),
+        url: payload.url.clone(),
+        headers: payload
+            .headers
+            .iter()
+            .filter(|h| h.enabled)
+            .map(|h| (h.key.clone(), h.value.clone()))
+            .collect(),
+        params: payload
+            .params
+            .iter()
+            .filter(|p| p.enabled)
+            .map(|p| (p.key.clone(), p.value.clone()))
+            .collect(),
+        body_type: payload.body.body_type.clone(),
+        body_content: payload.body.content.clone(),
+        env_active: meta.env_active.clone(),
+        env_snapshot: meta
+            .env_snapshot
+            .iter()
+            .map(|kv| (kv.key.clone(), kv.value.clone()))
+            .collect(),
+        replay_of_id: meta
+            .replay_of_id
+            .as_ref()
+            .map(|s| crate::core::history::EntryId(s.clone())),
+        tags: meta.tags.clone(),
+    };
+
+    match store.begin_http(&attempt) {
+        Ok(id) => Some((store, id)),
+        Err(e) => {
+            eprintln!("history: begin_http failed: {e}");
+            None
+        }
+    }
+}
+
+async fn execute_http_inner(
+    app: &AppHandle,
+    payload: &SendRequestPayload,
+    state: &State<'_, HttpClientState>,
+) -> Result<(HttpResponse, Vec<u8>), String> {
     let start = Instant::now();
 
     let url = ensure_scheme(&payload.url);
@@ -171,17 +295,17 @@ pub async fn send_http_request(
         "json" if !payload.body.content.is_empty() => {
             builder = builder
                 .header("Content-Type", "application/json")
-                .body(payload.body.content);
+                .body(payload.body.content.clone());
         }
         "text" if !payload.body.content.is_empty() => {
             builder = builder
                 .header("Content-Type", "text/plain")
-                .body(payload.body.content);
+                .body(payload.body.content.clone());
         }
         "x-www-form-urlencoded" if !payload.body.content.is_empty() => {
             builder = builder
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(payload.body.content);
+                .body(payload.body.content.clone());
         }
         _ => {}
     }
@@ -197,7 +321,6 @@ pub async fn send_http_request(
     let response_result = tokio::select! {
         res = request_future => res,
         _ = &mut cancel_rx => {
-            // Remove from active requests on cancel
             let mut requests = state.active_requests.lock().unwrap();
             requests.remove(&payload.request_id);
             return Err("Request cancelled by user".to_string());
@@ -296,7 +419,7 @@ pub async fn send_http_request(
         requests.remove(&payload.request_id);
     }
 
-    Ok(HttpResponse {
+    let resp = HttpResponse {
         status,
         status_text,
         headers: response_headers,
@@ -305,5 +428,6 @@ pub async fn send_http_request(
         is_binary,
         time_ms,
         size_bytes,
-    })
+    };
+    Ok((resp, all_bytes))
 }

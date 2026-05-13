@@ -6,11 +6,22 @@ export interface WsHeaderParam {
     enabled: boolean;
 }
 
+export interface WsHistoryMeta {
+    workspacePath: string;
+    collectionRequestId: string | null;
+    requestName: string | null;
+    collectionPath: string | null;
+    envActive: string | null;
+    envSnapshot: { key: string; value: string }[];
+    skip: boolean;
+}
+
 export interface WsConnectPayload {
     connectionId: string;
     url: string;
     headers: WsHeaderParam[];
     protocols: string[];
+    history?: WsHistoryMeta | null;
 }
 
 export interface WsSendPayload {
