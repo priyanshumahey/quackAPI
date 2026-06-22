@@ -30,6 +30,7 @@ import {
   updateEnvVariable,
   type EnvFile
 } from "@/lib/environments";
+import { cn } from "@/lib/utils";
 import { Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityBar, type ActivityTab } from "./activity-bar";
@@ -599,11 +600,6 @@ function WorkspaceContent() {
 
   const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
-  const activeRequest =
-    activeTab?.kind === "request"
-      ? findRequestInTree(collections, activeTab.id)
-      : null;
-
   const activeEnvName =
     activeTab?.kind === "environment"
       ? activeTab.id.replace("env-tab-", "")
@@ -703,6 +699,42 @@ function WorkspaceContent() {
         />
 
         <div className="flex-1 overflow-hidden">
+          {/*
+            Keep one mounted editor per open request tab so each tab retains its
+            own response/console state. Inactive tabs are hidden (not unmounted)
+            so switching between tabs preserves each tab's response.
+          */}
+          {openTabs.map((tab) => {
+            if (tab.kind !== "request") return null;
+            const req = findRequestInTree(collections, tab.id);
+            const relPath = req?.collectionFile ?? tab.collectionRelPath;
+            const isActive = activeTabId === tab.id;
+            const isWs = (req?.method ?? tab.method) === "WS";
+            return (
+              <div key={tab.id} className={cn("h-full", !isActive && "hidden")}>
+                {isWs ? (
+                  <WebSocketEditor
+                    connectionId={tab.id}
+                    collectionRelPath={relPath}
+                    workspacePath={folderPath}
+                    environments={environments}
+                    onOpenEnvTab={handleSelectEnv}
+                    onHistoryUpdated={bumpHistory}
+                  />
+                ) : (
+                  <RequestEditor
+                    requestId={tab.id}
+                    collectionRelPath={relPath}
+                    workspacePath={folderPath}
+                    environments={environments}
+                    onOpenEnvTab={handleSelectEnv}
+                    onHistoryUpdated={bumpHistory}
+                  />
+                )}
+              </div>
+            );
+          })}
+
           {activeTab?.kind === "environment" && activeEnvironment ? (
             <EnvironmentEditor
               environment={activeEnvironment}
@@ -759,20 +791,12 @@ function WorkspaceContent() {
                 });
               }}
             />
-          ) : activeRequest?.method === "WS" ? (
-            <WebSocketEditor
-              key={activeRequest.id}
-              connectionId={activeRequest.id}
-              collectionRelPath={activeRequest.collectionFile}
-              workspacePath={folderPath}
-              environments={environments}
-              onOpenEnvTab={handleSelectEnv}
-              onHistoryUpdated={bumpHistory}
-            />
-          ) : (
+          ) : null}
+
+          {!activeTab && (
             <RequestEditor
-              requestId={activeRequest?.id ?? null}
-              collectionRelPath={activeRequest?.collectionFile ?? null}
+              requestId={null}
+              collectionRelPath={null}
               workspacePath={folderPath}
               environments={environments}
               onOpenEnvTab={handleSelectEnv}

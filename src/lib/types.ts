@@ -4,9 +4,22 @@ export interface RequestHeader {
   enabled: boolean;
 }
 
+export interface MultipartField {
+  key: string;
+  /** "text" for a plain field, "file" for a file upload (value is a path). */
+  type: "text" | "file";
+  value: string;
+  /** Optional filename override for file fields. */
+  filename?: string;
+  /** Optional explicit content-type for this part. */
+  contentType?: string;
+}
+
 export interface RequestBody {
-  type: "none" | "json" | "text" | "form-data" | "x-www-form-urlencoded";
+  type: "none" | "json" | "text" | "form-data" | "multipart" | "x-www-form-urlencoded";
   content: string;
+  /** Parts for a multipart/form-data body (used when type is "multipart"). */
+  fields?: MultipartField[];
 }
 
 export interface QueryParam {

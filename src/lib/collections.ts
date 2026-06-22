@@ -1,4 +1,4 @@
-import type { HttpMethod } from "@/lib/types";
+import type { HttpMethod, MultipartField } from "@/lib/types";
 
 export interface CollectionRequestSummary {
     id: string;
@@ -22,6 +22,7 @@ export interface RequestParamDetail {
 export interface RequestBodyDetail {
     type: string;
     content: string;
+    fields?: MultipartField[];
 }
 
 export interface RequestDetails {

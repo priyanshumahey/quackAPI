@@ -1,5 +1,7 @@
 // ── HTTP request execution API ──────────────────────────────────────────────
 
+import type { MultipartField } from "@/lib/types";
+
 export interface RequestSettings {
     verifySsl: boolean;
     proxyUrl: string | null;
@@ -24,7 +26,7 @@ export interface SendRequestPayload {
     url: string;
     headers: { key: string; value: string; enabled: boolean }[];
     params: { key: string; value: string; enabled: boolean }[];
-    body: { type: string; content: string };
+    body: { type: string; content: string; fields?: MultipartField[] };
     settings?: RequestSettings;
     history?: HistoryMeta | null;
 }
