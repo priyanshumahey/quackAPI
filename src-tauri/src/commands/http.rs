@@ -90,6 +90,25 @@ pub struct BodyPayload {
     #[serde(rename = "type")]
     pub body_type: String,
     pub content: String,
+    #[serde(default)]
+    pub fields: Vec<MultipartFieldPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MultipartFieldPayload {
+    pub key: String,
+    #[serde(rename = "type", default = "default_field_type")]
+    pub field_type: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub filename: Option<String>,
+    #[serde(default, rename = "contentType")]
+    pub content_type: Option<String>,
+}
+
+fn default_field_type() -> String {
+    "text".to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -257,13 +276,66 @@ fn open_history_entry(
     }
 }
 
+/// Builds a `multipart/form-data` form from request fields. File parts are read
+/// from disk relative to the current working directory.
+async fn build_multipart_form(
+    fields: &[MultipartFieldPayload],
+) -> Result<reqwest::multipart::Form, String> {
+    let mut form = reqwest::multipart::Form::new();
+
+    for field in fields {
+        if field.key.is_empty() {
+            continue;
+        }
+
+        if field.field_type == "file" {
+            let path = field.value.clone();
+            let data = tokio::fs::read(&path)
+                .await
+                .map_err(|e| format!("multipart: failed to read file '{path}': {e}"))?;
+
+            let filename = field
+                .filename
+                .clone()
+                .filter(|f| !f.is_empty())
+                .unwrap_or_else(|| {
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "file".to_string())
+                });
+
+            let mut part = reqwest::multipart::Part::bytes(data).file_name(filename);
+            if let Some(ct) = &field.content_type {
+                if !ct.is_empty() {
+                    part = part
+                        .mime_str(ct)
+                        .map_err(|e| format!("multipart: invalid content type '{ct}': {e}"))?;
+                }
+            }
+            form = form.part(field.key.clone(), part);
+        } else {
+            let mut part = reqwest::multipart::Part::text(field.value.clone());
+            if let Some(ct) = &field.content_type {
+                if !ct.is_empty() {
+                    part = part
+                        .mime_str(ct)
+                        .map_err(|e| format!("multipart: invalid content type '{ct}': {e}"))?;
+                }
+            }
+            form = form.part(field.key.clone(), part);
+        }
+    }
+
+    Ok(form)
+}
+
 async fn execute_http_inner(
     app: &AppHandle,
     payload: &SendRequestPayload,
     state: &State<'_, HttpClientState>,
 ) -> Result<(HttpResponse, Vec<u8>), String> {
     let start = Instant::now();
-
     let url = ensure_scheme(&payload.url);
 
     let method: reqwest::Method = payload
@@ -306,6 +378,10 @@ async fn execute_http_inner(
             builder = builder
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .body(payload.body.content.clone());
+        }
+        "multipart" | "form-data" if !payload.body.fields.is_empty() => {
+            let form = build_multipart_form(&payload.body.fields).await?;
+            builder = builder.multipart(form);
         }
         _ => {}
     }

@@ -17,6 +17,8 @@ OPTIONS:
     -h, --help            Show this help message
         --no-history      Do not record this run in the history store
         --history-tag T   Tag history entries (e.g. CI run id) for filtering
+        --stream          Stream the response body as it arrives (SSE / chunked)
+        --expect-status N Exit non-zero unless the response status equals N (CI)
 
 EXAMPLES:
     quack list
@@ -24,6 +26,8 @@ EXAMPLES:
     quack run test-req-001
     quack run "Hello GET" --verbose
     quack run "Hello" -d /path/to/project
+    quack run "Chat (stream)" --stream
+    quack run "Health" --expect-status 200
 "#
     );
 }
@@ -35,6 +39,8 @@ struct CliArgs {
     verbose: bool,
     no_history: bool,
     history_tag: Option<String>,
+    stream: bool,
+    expect_status: Option<u16>,
 }
 
 #[derive(Debug)]
@@ -53,6 +59,8 @@ fn parse_args() -> CliArgs {
     let mut verbose = false;
     let mut no_history = false;
     let mut history_tag: Option<String> = None;
+    let mut stream = false;
+    let mut expect_status: Option<u16> = None;
     let mut positional: Vec<String> = vec![];
 
     let mut i = 0;
@@ -65,6 +73,8 @@ fn parse_args() -> CliArgs {
                     verbose,
                     no_history,
                     history_tag,
+                    stream,
+                    expect_status,
                 };
             }
             "-d" | "--dir" => {
@@ -81,6 +91,24 @@ fn parse_args() -> CliArgs {
             }
             "--no-history" => {
                 no_history = true;
+            }
+            "--stream" => {
+                stream = true;
+            }
+            "--expect-status" => {
+                i += 1;
+                if i < args.len() {
+                    match args[i].parse::<u16>() {
+                        Ok(code) => expect_status = Some(code),
+                        Err(_) => {
+                            eprintln!("Error: --expect-status requires a numeric status code");
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("Error: --expect-status requires a status code");
+                    process::exit(1);
+                }
             }
             "--history-tag" => {
                 i += 1;
@@ -124,6 +152,8 @@ fn parse_args() -> CliArgs {
         verbose,
         no_history,
         history_tag,
+        stream,
+        expect_status,
     }
 }
 
@@ -172,6 +202,8 @@ async fn cmd_run(
     verbose: bool,
     no_history: bool,
     history_tag: Option<String>,
+    stream: bool,
+    expect_status: Option<u16>,
 ) {
     let env_vars = match core::environments::resolve_env_vars(workspace_path) {
         Ok(v) => v,
@@ -209,7 +241,18 @@ async fn cmd_run(
         open_cli_history_entry(workspace_path, &details, &col_path, &env_vars, history_tag.as_deref())
     };
 
-    let response_result = core::http::execute_request(&details, &env_vars).await;
+    let response_result = if stream {
+        eprintln!("\n\x1b[2m── Streaming ──\x1b[0m");
+        use std::io::Write;
+        core::http::execute_request_streaming(&details, &env_vars, |chunk| {
+            let mut stdout = std::io::stdout();
+            let _ = stdout.write_all(chunk);
+            let _ = stdout.flush();
+        })
+        .await
+    } else {
+        core::http::execute_request(&details, &env_vars).await
+    };
 
     let response = match response_result {
         Ok(r) => {
@@ -272,13 +315,30 @@ async fn cmd_run(
         );
     }
 
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response.body) {
+    if stream {
+        // Body was already written incrementally to stdout as it arrived.
+        println!();
+    } else if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response.body) {
         if let Ok(pretty) = serde_json::to_string_pretty(&parsed) {
             println!("{pretty}");
-            return;
+        } else {
+            println!("{}", response.body);
+        }
+    } else {
+        println!("{}", response.body);
+    }
+
+    if let Some(expected) = expect_status {
+        if response.status == expected {
+            eprintln!("\x1b[32m✓ status {expected} as expected\x1b[0m");
+        } else {
+            eprintln!(
+                "\x1b[31m✗ assertion failed: expected status {expected}, got {}\x1b[0m",
+                response.status
+            );
+            process::exit(1);
         }
     }
-    println!("{}", response.body);
 }
 
 fn open_cli_history_entry(
@@ -363,6 +423,8 @@ async fn main() {
                 args.verbose,
                 args.no_history,
                 args.history_tag,
+                args.stream,
+                args.expect_status,
             )
             .await;
         }

@@ -53,6 +53,30 @@ pub struct BodyPayload {
     #[serde(rename = "type")]
     pub body_type: String,
     pub content: String,
+    #[serde(default)]
+    pub fields: Vec<MultipartField>,
+}
+
+/// A single part of a `multipart/form-data` body.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MultipartField {
+    pub key: String,
+    /// `"text"` for a plain field, `"file"` for a file upload.
+    #[serde(rename = "type", default = "default_field_type")]
+    pub field_type: String,
+    /// For a text field, the literal value. For a file field, the path to the file.
+    #[serde(default)]
+    pub value: String,
+    /// Optional filename override for file fields (defaults to the file's name).
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// Optional explicit content-type for this part.
+    #[serde(default, rename = "contentType")]
+    pub content_type: Option<String>,
+}
+
+fn default_field_type() -> String {
+    "text".to_string()
 }
 
 pub fn collections_dir(workspace_path: &str) -> std::path::PathBuf {
@@ -109,6 +133,27 @@ fn collect_json_files(dir: &Path, rel_prefix: &str) -> Result<Vec<(String, Colle
     Ok(out)
 }
 
+fn parse_multipart_field(value: &serde_json::Value) -> Option<MultipartField> {
+    let obj = value.as_object()?;
+    Some(MultipartField {
+        key: obj.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        field_type: obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("text")
+            .to_string(),
+        value: obj.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        filename: obj
+            .get("filename")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string),
+        content_type: obj
+            .get("contentType")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string),
+    })
+}
+
 pub fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
     let headers = req
         .headers
@@ -162,11 +207,17 @@ pub fn parse_request_details(req: &CollectionFileRequest) -> RequestDetails {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
+                fields: obj
+                    .and_then(|o| o.get("fields"))
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(parse_multipart_field).collect())
+                    .unwrap_or_default(),
             }
         }
         None => BodyPayload {
             body_type: "none".to_string(),
             content: String::new(),
+            fields: Vec::new(),
         },
     };
 
