@@ -72,6 +72,8 @@ function ItemContextMenu({
     onDelete,
     onAddRequest,
     onAddWebSocket,
+    onAddFolder,
+    onAddCollection,
     onOpenDocs,
     menuRef,
 }: {
@@ -81,6 +83,8 @@ function ItemContextMenu({
     onDelete: () => void;
     onAddRequest?: () => void;
     onAddWebSocket?: () => void;
+    onAddFolder?: () => void;
+    onAddCollection?: () => void;
     onOpenDocs?: () => void;
     menuRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -101,6 +105,22 @@ function ItemContextMenu({
             ref={menuRef}
             className="absolute right-0 top-7 z-50 min-w-[160px] rounded-lg border border-border bg-popover p-1 shadow-lg"
         >
+            {onAddFolder && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onClose(); onAddFolder(); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
+                >
+                    <FolderPlus className="size-3.5" /> New Folder
+                </button>
+            )}
+            {onAddCollection && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onClose(); onAddCollection(); }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-foreground/80 hover:bg-accent hover:text-accent-foreground transition-colors duration-150 cursor-pointer"
+                >
+                    <FileJson className="size-3.5" /> New Collection
+                </button>
+            )}
             {onAddRequest && (
                 <button
                     onClick={(e) => { e.stopPropagation(); onClose(); onAddRequest(); }}
@@ -518,6 +538,7 @@ function FolderItem({
     onDelete,
     onAddRequest,
     onAddWebSocket,
+    onStartCreate,
     creating,
     onCreateCommit,
     onCreateCancel,
@@ -537,6 +558,7 @@ function FolderItem({
     onDelete: (id: string, collectionRelPath?: string) => void;
     onAddRequest: (collectionRelPath: string) => void;
     onAddWebSocket?: (collectionRelPath: string) => void;
+    onStartCreate: (parentId: string, kind: "folder" | "collection", parentRelPath: string) => void;
     creating: { parentId: string; kind: "folder" | "collection" } | null;
     onCreateCommit: (name: string) => void;
     onCreateCancel: () => void;
@@ -614,6 +636,8 @@ function FolderItem({
                                         onClose={() => setMenuOpen(false)}
                                         onRename={() => onStartRename(item.id)}
                                         onDelete={() => onDelete(item.relPath)}
+                                        onAddFolder={() => onStartCreate(item.id, "folder", item.relPath)}
+                                        onAddCollection={() => onStartCreate(item.id, "collection", item.relPath)}
                                         onOpenDocs={() => onSelectFolder?.(item.relPath, item.name)}
                                         menuRef={menuRef}
                                     />
@@ -627,7 +651,7 @@ function FolderItem({
                                         depth={depth + 1}
                                         icon={creating.kind === "folder"
                                             ? <FolderClosed className="size-3.5 shrink-0 text-amber-500/70" />
-                                            : <FolderClosed className="size-3.5 shrink-0 text-muted-foreground" />}
+                                            : <FileJson className="size-3.5 shrink-0 text-muted-foreground" />}
                                         placeholder={creating.kind === "folder" ? "Folder name…" : "Collection name…"}
                                         onCommit={onCreateCommit}
                                         onCancel={onCreateCancel}
@@ -651,6 +675,7 @@ function FolderItem({
                                         onDelete={onDelete}
                                         onAddRequest={onAddRequest}
                                         onAddWebSocket={onAddWebSocket}
+                                        onStartCreate={onStartCreate}
                                         creating={creating}
                                         onCreateCommit={onCreateCommit}
                                         onCreateCancel={onCreateCancel}
@@ -681,6 +706,7 @@ function TreeItem({
     onDelete,
     onAddRequest,
     onAddWebSocket,
+    onStartCreate,
     creating,
     onCreateCommit,
     onCreateCancel,
@@ -700,6 +726,7 @@ function TreeItem({
     onDelete: (id: string, collectionRelPath?: string) => void;
     onAddRequest: (collectionRelPath: string) => void;
     onAddWebSocket?: (collectionRelPath: string) => void;
+    onStartCreate: (parentId: string, kind: "folder" | "collection", parentRelPath: string) => void;
     creating: { parentId: string; kind: "folder" | "collection" } | null;
     onCreateCommit: (name: string) => void;
     onCreateCancel: () => void;
@@ -722,6 +749,7 @@ function TreeItem({
                 onDelete={onDelete}
                 onAddRequest={onAddRequest}
                 onAddWebSocket={onAddWebSocket}
+                onStartCreate={onStartCreate}
                 creating={creating}
                 onCreateCommit={onCreateCommit}
                 onCreateCancel={onCreateCancel}
@@ -918,6 +946,15 @@ export function CollectionPanel({
         setCreating(null);
     }, [creating, onCreateFolder, onCreateCollection]);
 
+    const handleStartCreate = useCallback((parentId: string, kind: "folder" | "collection", parentRelPath: string) => {
+        setOpenFolders((prev) => {
+            const next = new Set(prev);
+            next.add(parentId);
+            return next;
+        });
+        setCreating({ parentId, kind, parentRelPath });
+    }, []);
+
     const startRootCreate = (kind: "folder" | "collection") => {
         setPlusMenuOpen(false);
         setCreating({ parentId: "__root__", kind, parentRelPath: "" });
@@ -1035,7 +1072,7 @@ export function CollectionPanel({
                             depth={0}
                             icon={creating.kind === "folder"
                                 ? <FolderClosed className="size-3.5 shrink-0 text-amber-500/70" />
-                                : <FolderClosed className="size-3.5 shrink-0 text-muted-foreground" />}
+                                : <FileJson className="size-3.5 shrink-0 text-muted-foreground" />}
                             placeholder={creating.kind === "folder" ? "Folder name…" : "Collection name…"}
                             onCommit={handleCreateCommit}
                             onCancel={() => setCreating(null)}
@@ -1063,6 +1100,7 @@ export function CollectionPanel({
                                     onDelete={handleDelete}
                                     onAddRequest={onAddRequest}
                                     onAddWebSocket={onAddWebSocket}
+                                    onStartCreate={handleStartCreate}
                                     creating={creating}
                                     onCreateCommit={handleCreateCommit}
                                     onCreateCancel={() => setCreating(null)}
